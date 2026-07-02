@@ -20,5 +20,17 @@ foreach ($id in 'dir','btnA','btnM','matchTable','workerSrc') {
   if ($html -notmatch ('id="' + [regex]::Escape($id) + '"')) { throw "Missing HTML element: $id" }
 }
 
+$publicHtml = Join-Path $repoRoot 'public\index.html'
+if (-not (Test-Path $publicHtml)) { throw 'Missing public/index.html' }
+if ((Get-FileHash $htmlPath -Algorithm SHA256).Hash -ne (Get-FileHash $publicHtml -Algorithm SHA256).Hash) {
+  throw 'public/index.html is not synchronized with the source HTML'
+}
+
+$wrangler = Get-Content (Join-Path $repoRoot 'wrangler.jsonc') -Raw | ConvertFrom-Json
+if ($wrangler.name -ne 'kline-similarity-tool' -or $wrangler.assets.directory -ne './public' -or
+    $wrangler.assets.not_found_handling -ne 'single-page-application') {
+  throw 'Invalid Cloudflare Static Assets configuration'
+}
+
 if ($html -match 'fetch\s*\(|XMLHttpRequest|WebSocket\s*\(') { throw 'Unexpected network API found' }
-Write-Host 'VERIFY_OK: tests, syntax, controls, and local-only policy passed.'
+Write-Host 'VERIFY_OK: tests, syntax, controls, static deployment, and local-only policy passed.'

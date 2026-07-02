@@ -39,6 +39,18 @@ powershell -ExecutionPolicy Bypass -File .\tests\verify.ps1
 
 测试覆盖复权、成交量调整、相似度边界、同期日期对齐、候选分散、Wilson 区间、缓存、近期滑窗、页面接线、脚本语法和无联网策略。
 
+## Cloudflare Workers 部署
+
+仓库包含可复现的 Static Assets 配置。部署副本位于 `public/index.html`，并由测试保证与根目录正式 HTML 完全一致。
+
+```powershell
+npm install
+npm run dev
+npm run deploy
+```
+
+也可以在 Cloudflare Dashboard 中连接此 GitHub 仓库，构建命令留空，部署命令使用 `npx wrangler deploy`。自定义域名应在新的 `workers.dev` 预览地址验证通过后再绑定。
+
 ## 风险说明
 
 本工具仅用于研究。相似形态和历史统计不构成投资建议，结果仍可能受到幸存者偏差、样本相关、参数选择和数据挖掘偏差影响。
