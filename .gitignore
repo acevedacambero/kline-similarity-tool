@@ -16,3 +16,7 @@ desktop.ini
 .idea/
 *.tmp
 *.log
+
+# Node and Cloudflare Wrangler caches
+node_modules/
+.wrangler/
