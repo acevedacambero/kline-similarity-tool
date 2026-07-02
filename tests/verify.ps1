@@ -1,4 +1,7 @@
 $ErrorActionPreference = 'Stop'
+
+node scripts/build.cjs --check
+if ($LASTEXITCODE -ne 0) { throw 'Generated HTML artifacts are stale' }
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $htmlPath = (Get-ChildItem $repoRoot -File -Filter '*.html' | Select-Object -First 1).FullName
 if (-not $htmlPath) { throw 'Target HTML not found' }
@@ -32,5 +35,10 @@ if ($wrangler.name -ne 'kline-similarity-tool' -or $wrangler.assets.directory -n
   throw 'Invalid Cloudflare Static Assets configuration'
 }
 
-if ($html -match 'fetch\s*\(|XMLHttpRequest|WebSocket\s*\(') { throw 'Unexpected network API found' }
+if ($html -match 'fetch\s*\(|XMLHttpRequest|WebSocket\s*\(|sendBeacon\s*\(') { throw 'Unexpected network API found' }
+if ($html -match '<(?:script|img|link)\b[^>]*(?:src|href)\s*=\s*["'']https?://' -or
+    $html -match '<form\b[^>]*action\s*=\s*["'']https?://' -or
+    $html -match 'createElement\s*\(\s*["'']script["'']\s*\)') {
+  throw 'Unexpected external resource or dynamic script loading found'
+}
 Write-Host 'VERIFY_OK: tests, syntax, controls, static deployment, and local-only policy passed.'

@@ -5,7 +5,7 @@ const HTML = findHtml();
 
 test('worker exposes versioned pure algorithm API', () => {
   const { api } = loadWorker(HTML);
-  assert.equal(api.version, 5);
+  assert.equal(api.version, 6);
   assert.equal(typeof api.parseDayBuffer, 'function');
   assert.equal(typeof api.applyCorporateActions, 'function');
 });
@@ -26,10 +26,41 @@ test('corporate actions adjust price and share-changing volume', () => {
   const bonus = api.corporateActionFactor(10, { cash: 0, bonus: 2, rights: 0, rightsPrice: 0 });
   assert.ok(Math.abs(bonus.priceFactor - 1 / 1.2) < 1e-12);
   assert.equal(bonus.volumeFactor, 1.2);
-  const series = { dates: Int32Array.from([20231229, 20240102]), closes: Float64Array.from([10, 8.4]), vols: Float64Array.from([1200, 1000]) };
+  const series = {
+    dates: Int32Array.from([20231229, 20240102]),
+    opens: Float64Array.from([9.8, 8.2]), highs: Float64Array.from([10.2, 8.6]), lows: Float64Array.from([9.7, 8.1]),
+    closes: Float64Array.from([10, 8.4]), vols: Float64Array.from([1200, 1000])
+  };
   api.applyCorporateActions(series, [{ d: 20240102, cash: 0, bonus: 2, rights: 0, rightsPrice: 0 }]);
   assert.ok(Math.abs(series.closes[0] - 10 / 1.2) < 1e-9);
+  assert.ok(Math.abs(series.opens[0] - 9.8 / 1.2) < 1e-9);
+  assert.ok(Math.abs(series.highs[0] - 10.2 / 1.2) < 1e-9);
+  assert.ok(Math.abs(series.lows[0] - 9.7 / 1.2) < 1e-9);
   assert.ok(Math.abs(series.vols[0] - 1000) < 1e-9);
+});
+
+test('day parser returns full records and rejects invalid or non-increasing dates', () => {
+  const { api } = loadWorker(HTML);
+  const buf = new ArrayBuffer(32 * 4);
+  const dv = new DataView(buf);
+  const put = (i, d, o, h, l, c, amount, v) => {
+    const p = i * 32;
+    dv.setUint32(p, d, true); dv.setUint32(p + 4, o, true); dv.setUint32(p + 8, h, true);
+    dv.setUint32(p + 12, l, true); dv.setUint32(p + 16, c, true); dv.setFloat32(p + 20, amount, true); dv.setUint32(p + 24, v, true);
+  };
+  put(0, 20260102, 1000, 1100, 900, 1050, 12345, 100);
+  put(1, 20260102, 1050, 1150, 1000, 1100, 15000, 120); // duplicate
+  put(2, 20251231, 1000, 1100, 900, 1000, 10000, 90);   // descending
+  put(3, 20260105, 1100, 1080, 1000, 1050, 18000, 130); // high < open
+  const out = api.parseDayBuffer(buf);
+  assert.deepEqual(Array.from(out.dates), [20260102]);
+  assert.deepEqual(Array.from(out.opens), [10]);
+  assert.deepEqual(Array.from(out.highs), [11]);
+  assert.deepEqual(Array.from(out.lows), [9]);
+  assert.deepEqual(Array.from(out.closes), [10.5]);
+  assert.deepEqual(Array.from(out.amounts), [12345]);
+  assert.deepEqual(Array.from(out.vols), [100]);
+  assert.equal(out.rejected, 3);
 });
 
 test('similarity primitives are stable on edge cases', () => {
@@ -48,6 +79,15 @@ test('common-date alignment never uses positional slices', () => {
   assert.deepEqual(Array.from(out.dates), [1, 3, 4]);
   assert.deepEqual(Array.from(out.aCloses), [10, 12, 13]);
   assert.deepEqual(Array.from(out.bCloses), [20, 22, 23]);
+});
+
+test('date slicing narrows peer data before common-date alignment', () => {
+  const { api } = loadWorker(HTML);
+  const stk = { dates: Int32Array.from([1, 3, 5, 7, 9]), closes: Float64Array.from([10, 11, 12, 13, 14]), vols: Float64Array.from([1, 2, 3, 4, 5]) };
+  const out = api.sliceSeriesByDate(stk, 4, 8);
+  assert.deepEqual(Array.from(out.dates), [5, 7]);
+  assert.deepEqual(Array.from(out.closes), [12, 13]);
+  assert.deepEqual(Array.from(out.vols), [3, 4]);
 });
 
 test('candidate merge is diversified and overlap is deduplicated', () => {
@@ -71,11 +111,27 @@ test('Wilson interval handles empty and small samples', () => {
   assert.ok(Math.abs(hi - 0.7634) < 0.001);
 });
 
+test('cross-stock returns are clustered by nearby market periods', () => {
+  const { api } = loadWorker(HTML);
+  const rows = [
+    { endD: 20260102, fut: { r5: .10 } }, { endD: 20260103, fut: { r5: -.02 } },
+    { endD: 20260220, fut: { r5: .03 } }, { endD: 20260221, fut: { r5: null } }
+  ];
+  assert.deepEqual(Array.from(api.clusterHorizonValues(rows, 'r5', 7)), [.04, .03]);
+  const chained = [20260102, 20260107, 20260112].map((endD, i) => ({ endD, fut: { r5: (i + 1) / 100 } }));
+  assert.deepEqual(Array.from(api.clusterHorizonValues(chained, 'r5', 7)), [.015, .03]);
+  const a = api.bootstrapWinInterval([.04, -.03, .02], 500, 7);
+  const b = api.bootstrapWinInterval([.04, -.03, .02], 500, 7);
+  assert.deepEqual(Array.from(a), Array.from(b));
+  assert.ok(a[0] >= 0 && a[1] <= 1 && a[0] <= a[1]);
+});
+
 test('cache validity includes algorithm and rights fingerprint', () => {
   const { api } = loadWorker(HTML);
-  const rec = { ver: 5, rv: 'abc', size: 32, mtime: 9 };
-  assert.equal(api.isCacheValid(rec, { size: 32, lastModified: 9 }, 'abc', 5), true);
-  assert.equal(api.isCacheValid(rec, { size: 32, lastModified: 9 }, 'xyz', 5), false);
+  const rec = { ver: 6, rv: 'abc', size: 32, mtime: 9 };
+  assert.equal(api.isCacheValid(rec, { size: 32, lastModified: 9 }, 'abc', 6), true);
+  assert.equal(api.isCacheValid(rec, { size: 32, lastModified: 9 }, 'xyz', 6), false);
+  assert.equal(api.isCacheValid({ ...rec, ver: 5 }, { size: 32, lastModified: 9 }, 'abc', 6), false);
 });
 
 test('recent windows default to L and always include latest window', () => {

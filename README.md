@@ -23,7 +23,7 @@
 3. 选择包含 `vipdoc` 与 `T0002` 的通达信根目录。
 4. 输入股票代码和目标日期，先分析，再选择模式匹配。
 
-目录选择和本地文件访问能力取决于浏览器。推荐使用较新的 Chromium 内核浏览器。
+目录选择和本地文件访问能力取决于浏览器。推荐使用最新版 Chrome 或 Edge。页面会在启动时检查 Web Worker、Blob、本地文件读取和 GBK 解码能力；目录访问 API 不可用时仍可使用蓝色文件夹选择按钮降级读取。
 
 ## 隐私
 
@@ -37,7 +37,9 @@
 powershell -ExecutionPolicy Bypass -File .\tests\verify.ps1
 ```
 
-测试覆盖复权、成交量调整、相似度边界、同期日期对齐、候选分散、Wilson 区间、缓存、近期滑窗、页面接线、脚本语法和无联网策略。
+测试覆盖统一日线解析、复权、成交量调整、相似度边界、同期日期截取与对齐、候选分散、时段聚类统计、缓存、近期滑窗、页面接线、脚本语法，以及网络 API、Beacon、外部资源、动态脚本和外部表单策略。
+
+源码位于 `src/page.template.html` 与 `src/algorithm.js`。修改源码后运行 `npm run build`，会确定性生成根目录单文件和 `public/index.html`；验证脚本会拒绝过期的生成物。
 
 ## Cloudflare Workers 部署
 
