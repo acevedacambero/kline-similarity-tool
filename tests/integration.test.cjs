@@ -44,9 +44,17 @@ test('result protocol contains effective statistical samples', () => {
 test('quick ranges use loaded trading dates and CSV records algorithm metadata', () => {
   const html = fs.readFileSync(HTML_PATH, 'utf8');
   assert.match(html, /referenceDates/);
+  assert.match(html, /function lastIndexOnOrBefore\(/);
+  assert.doesNotMatch(html, /\.findLastIndex\(/);
   assert.match(html, /权息状态/);
   assert.match(html, /统计样本/);
   assert.match(html, /算法版本/);
+});
+
+test('empty-result guidance reports the effective coarse threshold', () => {
+  const html = fs.readFileSync(HTML_PATH, 'utf8');
+  assert.match(html, /meta\.settings\.coarseThreshold\.toFixed\(2\)/);
+  assert.doesNotMatch(html, /当前要求32点形态余弦>0\.75/);
 });
 
 test('critical HTML controls remain present', () => {
