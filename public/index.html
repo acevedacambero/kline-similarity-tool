@@ -343,6 +343,11 @@ function recentWindowStarts(n,L,recentBars,step){
   if(out[out.length-1]!==last)out.push(last);
   return out;
 }
+function recentFreshnessCutoff(dates,refEndIndex,lookback=30){
+  if(!dates||!dates.length)return 0;
+  const end=Math.min(dates.length-1,Math.max(0,refEndIndex));
+  return dates[Math.max(0,end-Math.max(0,Math.floor(lookback)))]||0;
+}
 function wilsonInterval(wins,n,z=1.96){if(!n)return null;const p=wins/n,z2=z*z,den=1+z2/n,mid=(p+z2/(2*n))/den,half=z*Math.sqrt(p*(1-p)/n+z2/(4*n*n))/den;return [mid-half,mid+half]}
 function isCacheValid(hit,file,rv,ver=ALGO_VER){return !!hit&&hit.ver===ver&&hit.rv===rv&&hit.size===file.size&&hit.mtime===file.lastModified}
 
@@ -490,6 +495,7 @@ async function runMatch(cfg){
   const coarse=[];
   const scratch=new Float64Array(32);
   const mode=cfg.mode;
+  const recentCutoff=mode==="recent"?recentFreshnessCutoff(refStk.dates,re,30):0;
   const effectiveRecentBars=mode==="recent"?Math.max(L,Number.isFinite(cfg.recentBars)?Math.floor(cfg.recentBars):L):null;
   let done=0,skipped=0;
   const total=keys.length;
@@ -507,6 +513,7 @@ async function runMatch(cfg){
       if(!stk)continue;
       const n=stk.dates.length;
       if(cfg.exNew&&n<120)continue;
+      if(mode==="recent"&&stk.dates[n-1]<recentCutoff)continue;
       if(pending.length>=200&&DB){await idbPutBatch(DB,pending.splice(0))}
 
       if(mode==="peer"){
@@ -659,7 +666,7 @@ function packStk(stk,s,e){
   return {startD:stk.dates[s],endD:stk.dates[e],win,nnSmall,fut,futNn:futNn.length>1?Array.from(resample(new Float64Array(futNn),Math.min(60,futNn.length))):[],lastD:stk.lastD};
 }
 self.__KLINE_TEST_API__={version:ALGO_VER,parseDayBuffer,resolveRightsState,corporateActionFactor,applyCorporateActions,
-  zscore,cosine,dtwDist,zigAmps,alignCommonDates,dedupeOverlaps,mergePerStockCandidates,historicalMaxEnd,recentWindowStarts,wilsonInterval,isCacheValid};
+  zscore,cosine,dtwDist,zigAmps,alignCommonDates,dedupeOverlaps,mergePerStockCandidates,historicalMaxEnd,recentWindowStarts,recentFreshnessCutoff,wilsonInterval,isCacheValid};
 </script>
 
 <script>

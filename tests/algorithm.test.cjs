@@ -85,3 +85,11 @@ test('recent windows default to L and always include latest window', () => {
   assert.deepEqual(Array.from(api.recentWindowStarts(10, 20, 50, 3)), []);
   assert.deepEqual(Array.from(api.recentWindowStarts(100, 20, 10, 3)), [80]);
 });
+
+test('recent mode freshness cutoff is 30 reference trading days before target end', () => {
+  const { api } = loadWorker(HTML);
+  const dates = Int32Array.from(Array.from({ length: 50 }, (_, i) => 20260001 + i));
+  assert.equal(api.recentFreshnessCutoff(dates, 49), dates[19]);
+  assert.equal(api.recentFreshnessCutoff(dates, 20), dates[0]);
+  assert.equal(api.recentFreshnessCutoff(dates, 49, 10), dates[39]);
+});
