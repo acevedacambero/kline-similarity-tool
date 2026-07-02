@@ -1,6 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const path = require('node:path');
 const { findHtml } = require('./load-worker.cjs');
 const HTML_PATH = findHtml();
 
@@ -46,4 +47,17 @@ test('recent mode controls and metadata are wired', () => {
   assert.match(html, /id="recentBars"/);
   assert.match(html, /querySelectorAll\('input\[name=mode\]'\)/);
   assert.match(html, /近期范围/);
+});
+
+test('Cloudflare public entry is identical to the source HTML', () => {
+  const publicHtml = path.resolve(__dirname, '..', 'public', 'index.html');
+  assert.deepEqual(fs.readFileSync(publicHtml), fs.readFileSync(HTML_PATH));
+});
+
+test('Wrangler serves public as a single-page static site', () => {
+  const configPath = path.resolve(__dirname, '..', 'wrangler.jsonc');
+  const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+  assert.equal(config.name, 'kline-similarity-tool');
+  assert.equal(config.assets.directory, './public');
+  assert.equal(config.assets.not_found_handling, 'single-page-application');
 });
