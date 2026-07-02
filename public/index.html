@@ -820,6 +820,9 @@ function keyOf(code){return (code.startsWith("6")||code.startsWith("5")?"sh":/^(
 const dnum=s=>parseInt(s.replace(/-/g,""),10);
 const fmtD=d=>String(d).replace(/^(\d{4})(\d{2})(\d{2})$/,"$1/$2/$3");
 const pct=x=>x===null||x===undefined?"—":(x*100).toFixed(1)+"%";
+function lastIndexOnOrBefore(dates,target){
+  let lo=0,hi=dates.length-1,ans=-1;while(lo<=hi){const m=(lo+hi)>>1;if(dates[m]<=target){ans=m;lo=m+1}else hi=m-1}return ans;
+}
 
 let savedIsolate=$("isolate").checked;
 function syncModeControls(){
@@ -838,7 +841,7 @@ $("quickBtns").addEventListener("click",e=>{
   if(!n)return;
   e.preventDefault();
   if(referenceDates&&referenceDates.length){
-    const end=dnum($("d2").value),ei=referenceDates.findLastIndex(d=>d<=end);
+    const end=dnum($("d2").value),ei=lastIndexOnOrBefore(referenceDates,end);
     if(ei>=0){const d=String(referenceDates[Math.max(0,ei-parseInt(n)+1)]);$("d1").value=d.slice(0,4)+"-"+d.slice(4,6)+"-"+d.slice(6);setMsg("区间",`已按实际交易日回推 ${n} 日。`);return}
   }
   const d2=new Date($("d2").value||new Date()),d1=new Date(d2.getTime()-n*1.45*864e5);
@@ -1075,7 +1078,7 @@ function renderResults(){
   $("matchTitle").textContent=`匹配结果 · ${modeTxt} · 窗口${meta.L}个交易日${meta.mode==="recent"?` · 近期范围${meta.recentBars}日`:""} · 扫描${meta.scanned}只 · 跳过${meta.skipped||0}只 · 耗时${meta.elapsed}秒`+(meta.refWarn?" · ⚠未复权":" · 真实权息前复权");
   if(!rows.length){
     $("btStats").textContent="";$("matchTable").querySelector("tbody").textContent="";
-    $("btNote").textContent="没有找到符合条件的匹配。可尝试：缩短窗口（形态更通用）、关闭防前视限制、放宽市场范围、或降低粗筛门槛（当前要求32点形态余弦>0.75）。";
+    $("btNote").textContent=`没有找到符合条件的匹配。可尝试：缩短窗口（形态更通用）、关闭防前视限制、放宽市场范围、或降低粗筛门槛（当前要求32点形态余弦>${meta.settings.coarseThreshold.toFixed(2)}）。`;
     setMsg("匹配","完成，但无匹配结果。");return;
   }
   const bt=$("btStats");bt.textContent="";
