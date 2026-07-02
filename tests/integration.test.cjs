@@ -10,8 +10,23 @@ test('matching pipeline uses diversified merge and inner-loop cancellation', () 
   assert.match(html, /mergePerStockCandidates\(coarse,10,K_COARSE\)/);
   assert.match(html, /slideChecks%256===0/);
   assert.match(html, /historicalMaxEnd\(stk\.dates,refStartD\)/);
-  assert.match(html, /alignCommonDates\(refWin,stk\)/);
+  assert.match(html, /alignCommonDates\(refWin,peerSlice\)/);
   assert.match(html, /vols:p\.vols/);
+});
+
+test('peer mode slices dates and advanced presets feed effective matching settings', () => {
+  const html = fs.readFileSync(HTML_PATH, 'utf8');
+  assert.match(html, /sliceSeriesByDate\(stk,refStartD,refEndD\)/);
+  for (const id of ['matchPreset', 'coarseTh', 'coarseLimit', 'dtwLimit', 'dtwBand']) assert.match(html, new RegExp(`id="${id}"`));
+  assert.match(html, /coarseThreshold:Math\.min/);
+  assert.match(html, /settings:\{preset:cfg\.preset\|\|"custom",coarseThreshold,K_COARSE,K_DTW,dtwBand\}/);
+});
+
+test('UI analysis consumes the canonical worker OHLC series', () => {
+  const html = fs.readFileSync(HTML_PATH, 'utf8');
+  assert.doesNotMatch(html, /function parseDayLocal\(/);
+  assert.match(html, /opens:p\.opens,highs:p\.highs,lows:p\.lows,closes:p\.closes,amounts:p\.amounts/);
+  assert.match(html, /const rows=Array\.from\(adj\.dates/);
 });
 
 test('result protocol contains effective statistical samples', () => {
@@ -19,6 +34,11 @@ test('result protocol contains effective statistical samples', () => {
   assert.match(html, /statRows/);
   assert.match(html, /wilsonInterval/);
   assert.match(html, /有效n=/);
+  assert.match(html, /skipReasons/);
+  assert.match(html, /skipDetails/);
+  assert.match(html, /clusterHorizonValues\(statRows,hk,7\)/);
+  assert.match(html, /meta\.statSummary\[hk\]/);
+  assert.match(html, /独立时段n=/);
 });
 
 test('quick ranges use loaded trading dates and CSV records algorithm metadata', () => {
@@ -69,6 +89,13 @@ test('CSV export starts with code and omits ranking values', () => {
   assert.match(html, /lines\.push\(\[r\.key\.slice\(2\),/);
   assert.doesNotMatch(html, /const head=\["排名"/);
   assert.doesNotMatch(html, /lines\.push\(\[i\+1,/);
+  assert.match(html, /"粗筛阈值","粗筛候选","DTW候选","DTW带宽","跳过原因"/);
+});
+
+test('result note exposes the leading rejection reasons', () => {
+  const html = fs.readFileSync(HTML_PATH, 'utf8');
+  assert.match(html, /Object\.entries\(meta\.skipReasons\|\|\{\}\)/);
+  assert.match(html, /主要淘汰：/);
 });
 
 test('Cloudflare public entry is identical to the source HTML', () => {
@@ -82,4 +109,20 @@ test('Wrangler serves public as a single-page static site', () => {
   assert.equal(config.name, 'kline-similarity-tool');
   assert.equal(config.assets.directory, './public');
   assert.equal(config.assets.not_found_handling, 'single-page-application');
+});
+
+test('browser capability failures are reported before file processing', () => {
+  const html = fs.readFileSync(HTML_PATH, 'utf8');
+  assert.match(html, /function checkBrowserCapabilities\(/);
+  assert.match(html, /Web Worker、Blob 或本地文件读取能力/);
+  assert.match(html, /不支持 GBK 证券名称解码/);
+});
+
+test('single-file artifacts are generated from a page template and algorithm source', () => {
+  const root = path.resolve(__dirname, '..');
+  assert.equal(fs.existsSync(path.join(root, 'src', 'page.template.html')), true);
+  assert.equal(fs.existsSync(path.join(root, 'src', 'algorithm.js')), true);
+  assert.equal(fs.existsSync(path.join(root, 'scripts', 'build.cjs')), true);
+  const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
+  assert.equal(pkg.scripts.build, 'node scripts/build.cjs');
 });
