@@ -76,9 +76,9 @@ details summary{cursor:pointer;font-size:13px;color:#2a78d6;margin-top:8px}
   </div>
   <fieldset><legend>匹配设置</legend>
     <span class="chip"><b style="font-size:13px">模式</b>
-      <label class="chip"><input type="radio" name="mode" value="hist" checked>历史滑窗搜索（历史上谁走出过类似形态）</label>
+      <label class="chip"><input type="radio" name="mode" value="recent" checked>近期相似区间（每只证券近期范围内搜索）</label>
+      <label class="chip"><input type="radio" name="mode" value="hist">历史滑窗搜索（历史上谁走出过类似形态）</label>
       <label class="chip"><input type="radio" name="mode" value="peer">同期联动（同区间谁和它最像）</label>
-      <label class="chip"><input type="radio" name="mode" value="recent">近期相似区间（每只证券近期范围内搜索）</label>
     </span>
     <span class="chip">滑窗步长<select id="step"><option value="2">2</option><option value="3" selected>3</option><option value="5">5</option></select></span>
     <span class="chip">近期范围<input type="number" id="recentBars" min="15" max="5000" placeholder="自动" disabled>交易日</span>
@@ -788,6 +788,7 @@ function syncModeControls(){
   if(isRecent)setMsg("模式",`近期模式按每只证券最新数据向前搜索；近期范围留空时自动等于目标区间交易日数。`);
 }
 document.querySelectorAll('input[name=mode]').forEach(r=>r.addEventListener("change",syncModeControls));
+syncModeControls();
 
 $("quickBtns").addEventListener("click",e=>{
   const n=e.target.dataset&&e.target.dataset.n;
@@ -1178,10 +1179,10 @@ function drawOverlay(r){
 
 $("btnCsv").onclick=()=>{
   if(!lastRows)return;
-  const head=["排名","代码","名称","开始","结束","模式","近期范围","综合分","累计走势","收益序列","拐点","均线","量能","DTW","复权存疑","权息状态","统计样本","算法版本","r5","r10","r20","r60","max60涨","max60撤"];
+  const head=["代码","名称","开始","结束","模式","近期范围","综合分","累计走势","收益序列","拐点","均线","量能","DTW","复权存疑","权息状态","统计样本","算法版本","r5","r10","r20","r60","max60涨","max60撤"];
   const lines=[head.join(",")];
   lastRows.forEach((r,i)=>{
-    lines.push([i+1,r.key.slice(2),(names[r.key]||"").replace(/,/g,""),r.startD,r.endD,lastMeta.mode,lastMeta.recentBars??"",r.score.toFixed(4),
+    lines.push([r.key.slice(2),(names[r.key]||"").replace(/,/g,""),r.startD,r.endD,lastMeta.mode,lastMeta.recentBars??"",r.score.toFixed(4),
       r.sub.cum.toFixed(3),r.sub.ret.toFixed(3),r.sub.zig.toFixed(3),r.sub.ma.toFixed(3),r.sub.vol.toFixed(3),
       r.sub.dtw!==undefined?r.sub.dtw.toFixed(3):"",r.warn?1:0,rightsState,lastStatRows&&lastStatRows.includes(r)?1:0,UI_ALGO_VER,
       ...[r.fut.r5,r.fut.r10,r.fut.r20,r.fut.r60,r.fut.maxUp,r.fut.maxDn].map(x=>x===null||x===undefined?"":(x*100).toFixed(2))
