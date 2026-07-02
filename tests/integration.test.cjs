@@ -55,6 +55,22 @@ test('recent mode controls and metadata are wired', () => {
   assert.match(html, /近期范围/);
 });
 
+test('recent mode is first and selected by default', () => {
+  const html = fs.readFileSync(HTML_PATH, 'utf8');
+  const radios = [...html.matchAll(/<input type="radio" name="mode" value="(hist|peer|recent)"([^>]*)>/g)];
+  assert.deepEqual(radios.map(x => x[1]), ['recent', 'hist', 'peer']);
+  assert.deepEqual(radios.filter(x => /\bchecked\b/.test(x[2])).map(x => x[1]), ['recent']);
+  assert.match(html, /forEach\(r=>r\.addEventListener\("change",syncModeControls\)\);\s*syncModeControls\(\);/);
+});
+
+test('CSV export starts with code and omits ranking values', () => {
+  const html = fs.readFileSync(HTML_PATH, 'utf8');
+  assert.match(html, /const head=\["代码","名称","开始","结束"/);
+  assert.match(html, /lines\.push\(\[r\.key\.slice\(2\),/);
+  assert.doesNotMatch(html, /const head=\["排名"/);
+  assert.doesNotMatch(html, /lines\.push\(\[i\+1,/);
+});
+
 test('Cloudflare public entry is identical to the source HTML', () => {
   const publicHtml = path.resolve(__dirname, '..', 'public', 'index.html');
   assert.deepEqual(fs.readFileSync(publicHtml), fs.readFileSync(HTML_PATH));
