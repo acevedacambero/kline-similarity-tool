@@ -1,0 +1,18 @@
+# Local TongdaXin market data and caches
+vipdoc/
+T0002/
+backups/
+*.day
+*.tnf
+gbbq
+*.db
+*.db-journal
+
+# OS and editor files
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/
+*.tmp
+*.log
