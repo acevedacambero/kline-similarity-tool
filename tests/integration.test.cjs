@@ -41,6 +41,12 @@ test('recent mode uses bounded windows and returns actual range', () => {
   assert.match(html, /recentBars:effectiveRecentBars/);
 });
 
+test('recent mode excludes securities stale by more than 30 reference trading days', () => {
+  const html = fs.readFileSync(HTML_PATH, 'utf8');
+  assert.match(html, /recentFreshnessCutoff\(refStk\.dates,re,30\)/);
+  assert.match(html, /mode==="recent"&&stk\.dates\[n-1\]<recentCutoff/);
+});
+
 test('recent mode controls and metadata are wired', () => {
   const html = fs.readFileSync(HTML_PATH, 'utf8');
   assert.match(html, /value="recent"/);
