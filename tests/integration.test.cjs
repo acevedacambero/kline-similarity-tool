@@ -47,6 +47,11 @@ test('local benchmark indexes are discovered outside the stock universe', () => 
   assert.match(html,/benchmarks:\[\.\.\.benchmarkFiles\.entries\(\)\]/);
 });
 
+test('result UI and CSV expose excess returns and sample maturity', () => {
+  const html=fs.readFileSync(HTML_PATH,'utf8');
+  for(const marker of ['超额簇级胜率','完整率','中位滞后','基准收益r5','超额收益r5'])assert.ok(html.includes(marker),marker);
+});
+
 test('result protocol contains effective statistical samples', () => {
   const html = fs.readFileSync(HTML_PATH, 'utf8');
   assert.match(html, /statRows/);

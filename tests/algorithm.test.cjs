@@ -110,6 +110,26 @@ test('benchmark return aligns each endpoint to the nearest prior date', () => {
   assert.equal(api.benchmarkReturn(benchmark,20250101,20260110),null);
 });
 
+test('excess return uses compounded subtraction and preserves missing benchmarks', () => {
+  const { api } = loadWorker(HTML);
+  assert.ok(Math.abs(api.excessReturn(.10,.04) - (1.10/1.04-1)) < 1e-12);
+  assert.equal(api.excessReturn(.10,null), null);
+});
+
+test('horizon summary reports completeness and median lag bars', () => {
+  const { api } = loadWorker(HTML);
+  const rows=[
+    {endD:20260101,fut:{r5:.1},excess:{r5:.05},lagBars:{r5:8}},
+    {endD:20260102,fut:{r5:null},excess:{r5:null},lagBars:{r5:null}},
+    {endD:20260120,fut:{r5:.2},excess:{r5:.12},lagBars:{r5:12}}
+  ];
+  const s=api.summarizeHorizon(rows,'r5');
+  assert.equal(s.totalN,3);
+  assert.equal(s.rawN,2);
+  assert.equal(s.completeRate,2/3);
+  assert.equal(s.medianLagBars,10);
+});
+
 test('similarity primitives are stable on edge cases', () => {
   const { api } = loadWorker(HTML);
   assert.deepEqual(Array.from(api.zscore([3, 3, 3])), [0, 0, 0]);

@@ -25,6 +25,21 @@ function benchmarkReturn(series,startD,endD){
   if(s<0||e<=s||!Number.isFinite(series.closes[s])||!Number.isFinite(series.closes[e])||series.closes[s]<=0)return null;
   return series.closes[e]/series.closes[s]-1;
 }
+function excessReturn(stockReturn,indexReturn){
+  return Number.isFinite(stockReturn)&&Number.isFinite(indexReturn)?(1+stockReturn)/(1+indexReturn)-1:null;
+}
+function medianOf(values){
+  if(!values.length)return null;
+  const a=[...values].sort((x,y)=>x-y),m=a.length>>1;
+  return a.length%2?a[m]:(a[m-1]+a[m])/2;
+}
+function summarizeHorizon(rows,horizon){
+  const valid=rows.filter(r=>Number.isFinite(r.fut?.[horizon]));
+  const excess=rows.filter(r=>Number.isFinite(r.excess?.[horizon]));
+  const lags=valid.map(r=>r.lagBars?.[horizon]).filter(Number.isFinite);
+  return {totalN:rows.length,rawN:valid.length,excessN:excess.length,missingN:rows.length-valid.length,
+    completeRate:rows.length?valid.length/rows.length:0,medianLagBars:medianOf(lags)};
+}
 
 function zscore(a){
   const n=a.length;let m=0;for(let i=0;i<n;i++)m+=a[i];m/=n;
@@ -272,9 +287,9 @@ function recentFreshnessCutoff(dates,refEndIndex,lookback=30){
   const end=Math.min(dates.length-1,Math.max(0,refEndIndex));
   return dates[Math.max(0,end-Math.max(0,Math.floor(lookback)))]||0;
 }
-function clusterHorizonValues(rows,horizon,maxGapDays=7){
-  const valid=rows.filter(r=>r.fut&&Number.isFinite(r.fut[horizon])).sort((a,b)=>a.endD-b.endD),out=[];let vals=[],anchor=null;
-  for(const r of valid){const day=dateOrdinal(r.endD);if(anchor!==null&&day-anchor>maxGapDays){out.push(vals.reduce((a,b)=>a+b,0)/vals.length);vals=[];anchor=day}else if(anchor===null)anchor=day;vals.push(r.fut[horizon])}
+function clusterHorizonValues(rows,horizon,maxGapDays=7,family="fut"){
+  const valid=rows.filter(r=>r[family]&&Number.isFinite(r[family][horizon])).sort((a,b)=>a.endD-b.endD),out=[];let vals=[],anchor=null;
+  for(const r of valid){const day=dateOrdinal(r.endD);if(anchor!==null&&day-anchor>maxGapDays){out.push(vals.reduce((a,b)=>a+b,0)/vals.length);vals=[];anchor=day}else if(anchor===null)anchor=day;vals.push(r[family][horizon])}
   if(vals.length)out.push(vals.reduce((a,b)=>a+b,0)/vals.length);return out;
 }
 function bootstrapWinInterval(values,iterations=1000,seed=20260703){
@@ -389,6 +404,9 @@ async function runMatch(cfg){
 
   const refKey=cfg.refKey;
   const timeframe=normalizeTimeframe(cfg.timeframe);
+  const benchmarkAgg=new Map();
+  for(const [key,daily] of BENCHMARKS)benchmarkAgg.set(key,aggregateSeries({...daily,lastD:daily.dates[daily.dates.length-1]},timeframe));
+  const benchmarkFor=key=>benchmarkAgg.get(benchmarkKeyFor(key))||null;
   const refDaily=await getStock(refKey,pending);
   if(!refDaily){post({type:"error",msg:"未找到参考股票数据"});return}
   const refStk=aggregateSeries(refDaily,timeframe,cfg.d2);
@@ -494,7 +512,7 @@ async function runMatch(cfg){
         peerRef.zma=zscore(rma);peerRef.zvol=zscore(rvol);
         const sub=subScores(peerStk,0,peerStk.closes.length-1,peerRef,cfg.zzth);
         sub.cum=cum;sub.ret=ret;
-        coarse.push({key,s,e,sub,warn:stk.warn,stk:packStk(stk,s,e),coarse:0.5*cum+0.5*ret});
+        coarse.push({key,s,e,sub,warn:stk.warn,stk:packStk(stk,s,e,benchmarkFor(key)),coarse:0.5*cum+0.5*ret});
       }else{
         const minLen=mode==="recent"?L:L+5;
         if(n<minLen){skip("窗口数据不足",key);continue}
@@ -557,7 +575,7 @@ async function runMatch(cfg){
         if(daily){stk=aggregateSeries(daily,timeframe);stk.ma20=ma20Arr(stk.closes)}
       }catch(_){}
       for(const c of cands){
-        if(stk&&c.e<stk.dates.length){c.sub=subScores(stk,c.s,c.e,R,cfg.zzth);c.stk=packStk(stk,c.s,c.e)}
+        if(stk&&c.e<stk.dates.length){c.sub=subScores(stk,c.s,c.e,R,cfg.zzth);c.stk=packStk(stk,c.s,c.e,benchmarkFor(key))}
         else c.drop=true;
       }
       if(++rdone%40===0)await new Promise(r=>setTimeout(r));
@@ -599,10 +617,14 @@ async function runMatch(cfg){
   const toRow=c=>{
     const st=c.stk;
     return {key:c.key,startD:st.startD,endD:st.endD,score:c.score,sub:c.sub,warn:c.warn,
-      fut:st.fut,nn:st.nnSmall,futNn:st.futNn,lastD:st.lastD};
+      fut:st.fut,benchmark:st.benchmark,excess:st.excess,lagBars:st.lagBars,benchmarkKey:benchmarkKeyFor(c.key),nn:st.nnSmall,futNn:st.futNn,lastD:st.lastD};
   };
   const rows=kept.map(toRow),statRows=dedupeOverlaps(kept,0.7,L).map(toRow),statSummary={};
-  for(const hk of["r5","r10","r20","r60"]){const raw=statRows.map(r=>r.fut[hk]).filter(Number.isFinite),clusters=clusterHorizonValues(statRows,hk,7).sort((a,b)=>a-b);statSummary[hk]={rawN:raw.length,periodN:clusters.length,win:clusters.length?clusters.filter(x=>x>0).length/clusters.length:null,interval:bootstrapWinInterval(clusters),median:clusters.length?clusters[Math.floor(clusters.length/2)]:null}}
+  for(const hk of["r5","r10","r20","r60"]){
+    const maturity=summarizeHorizon(statRows,hk),family=maturity.excessN?"excess":"fut";
+    const clusters=clusterHorizonValues(statRows,hk,7,family).sort((a,b)=>a-b);
+    statSummary[hk]={...maturity,family,periodN:clusters.length,win:clusters.length?clusters.filter(x=>x>0).length/clusters.length:null,interval:bootstrapWinInterval(clusters),median:medianOf(clusters)};
+  }
   post({type:"result",rows,statRows,meta:{mode,timeframe,recentBars:effectiveRecentBars,scanned:total,skipped,skipReasons,skipDetails,settings:{preset:cfg.preset||"custom",coarseThreshold,coarseThresholdEffective,K_COARSE,K_DTW,dtwBand},statSummary,L,refStartD,refEndD,elapsed:((Date.now()-t0)/1000).toFixed(1),
     refWarn:refStk.warn,candidates:coarse.length,refNn:Array.from(resample(refStk.closes.subarray(rs,re+1),120)).map(x=>x/refStk.closes[rs])}});
 }
@@ -612,13 +634,19 @@ function lastIdxBefore(dates,d){
   while(lo<=hi){const m=(lo+hi)>>1;if(dates[m]<d){ans=m+1;lo=m+1}else hi=m-1}
   return ans;
 }
-function packStk(stk,s,e){
+function packStk(stk,s,e,benchmarkSeries=null){
   const L=e-s+1,c0=stk.closes[s];
   const win=Array.from(stk.closes.subarray(s,e+1));
   const nnSmall=Array.from(resample(stk.closes.subarray(s,e+1),120)).map(x=>x/c0);
   const n=stk.dates.length;
-  const fut={};
-  for(const h of[5,10,20,60])fut["r"+h]=e+h<n?stk.closes[e+h]/stk.closes[e]-1:null;
+  const fut={},benchmark={},excess={},lagBars={};
+  for(const h of[5,10,20,60]){
+    const hk="r"+h,valid=e+h<n;
+    fut[hk]=valid?stk.closes[e+h]/stk.closes[e]-1:null;
+    benchmark[hk]=valid?benchmarkReturn(benchmarkSeries,stk.dates[e],stk.dates[e+h]):null;
+    excess[hk]=excessReturn(fut[hk],benchmark[hk]);
+    lagBars[hk]=valid?n-1-e:null;
+  }
   let mu=null,md=null;
   if(e+60<n){
     let pk=stk.closes[e];mu=0;md=0;
@@ -632,7 +660,7 @@ function packStk(stk,s,e){
   fut.maxUp=mu;fut.maxDn=md;
   const fe=Math.min(n-1,e+60);
   const futNn=fe>e?Array.from(stk.closes.subarray(e,fe+1)).map(x=>x/c0):[];
-  return {startD:stk.dates[s],endD:stk.dates[e],win,nnSmall,fut,futNn:futNn.length>1?Array.from(resample(new Float64Array(futNn),Math.min(60,futNn.length))):[],lastD:stk.lastD};
+  return {startD:stk.dates[s],endD:stk.dates[e],win,nnSmall,fut,benchmark,excess,lagBars,futNn:futNn.length>1?Array.from(resample(new Float64Array(futNn),Math.min(60,futNn.length))):[],lastD:stk.lastD};
 }
 self.__KLINE_TEST_API__={version:ALGO_VER,parseDayBuffer,resolveRightsState,corporateActionFactor,applyCorporateActions,
-  aggregateSeries,periodKey,zscore,cosine,dtwDist,zigAmps,alignCommonDates,sliceSeriesByDate,dedupeOverlaps,mergePerStockCandidates,historicalMaxEnd,recentWindowStarts,recentFreshnessCutoff,clusterHorizonValues,bootstrapWinInterval,isCacheValid,adaptiveCoarseThreshold,boardOfKey,benchmarkKeyFor,indexOnOrBefore,benchmarkReturn};
+  aggregateSeries,periodKey,zscore,cosine,dtwDist,zigAmps,alignCommonDates,sliceSeriesByDate,dedupeOverlaps,mergePerStockCandidates,historicalMaxEnd,recentWindowStarts,recentFreshnessCutoff,clusterHorizonValues,bootstrapWinInterval,isCacheValid,adaptiveCoarseThreshold,boardOfKey,benchmarkKeyFor,indexOnOrBefore,benchmarkReturn,excessReturn,medianOf,summarizeHorizon};
