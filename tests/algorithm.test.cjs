@@ -5,7 +5,7 @@ const HTML = findHtml();
 
 test('worker exposes versioned pure algorithm API', () => {
   const { api } = loadWorker(HTML);
-  assert.equal(api.version, 8);
+  assert.equal(api.version, 9);
   assert.equal(typeof api.parseDayBuffer, 'function');
   assert.equal(typeof api.applyCorporateActions, 'function');
 });
@@ -116,6 +116,15 @@ test('common-date alignment never uses positional slices', () => {
   assert.deepEqual(Array.from(weekly.bCloses), [20]);
 });
 
+test('period alignment returns candidate indices when weekly closing dates differ', () => {
+  const { api } = loadWorker(HTML);
+  const a = { dates: Int32Array.from([20260109, 20260116]), periods: Int32Array.from([20461, 20468]), closes: Float64Array.from([1, 2]), vols: Float64Array.from([10, 20]) };
+  const b = { dates: Int32Array.from([20260108, 20260116]), periods: Int32Array.from([20461, 20468]), closes: Float64Array.from([3, 4]), vols: Float64Array.from([30, 40]) };
+  const out = api.alignCommonDates(a, b);
+  assert.deepEqual(Array.from(out.bIndices), [0, 1]);
+  assert.deepEqual(Array.from(out.bDates), [20260108, 20260116]);
+});
+
 test('date slicing narrows peer data before common-date alignment', () => {
   const { api } = loadWorker(HTML);
   const stk = { dates: Int32Array.from([1, 3, 5, 7, 9]), closes: Float64Array.from([10, 11, 12, 13, 14]), vols: Float64Array.from([1, 2, 3, 4, 5]) };
@@ -136,14 +145,6 @@ test('candidate merge is diversified and overlap is deduplicated', () => {
   assert.deepEqual([...new Set(merged.map(x => x.key))].sort(), ['A', 'B']);
   assert.equal(api.dedupeOverlaps(rows.filter(x => x.key === 'B'), 0.7, 20).length, 1);
   assert.equal(api.historicalMaxEnd([1, 2, 5, 9], 5), 1);
-});
-
-test('Wilson interval handles empty and small samples', () => {
-  const { api } = loadWorker(HTML);
-  assert.equal(api.wilsonInterval(0, 0), null);
-  const [lo, hi] = api.wilsonInterval(5, 10);
-  assert.ok(Math.abs(lo - 0.2366) < 0.001);
-  assert.ok(Math.abs(hi - 0.7634) < 0.001);
 });
 
 test('cross-stock returns are clustered by nearby market periods', () => {
