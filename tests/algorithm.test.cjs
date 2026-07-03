@@ -148,6 +148,20 @@ test('cache eviction removes stale versions then least-recently-used records', (
   assert.deepEqual(Array.from(api.selectCacheEvictions(records.slice(1),{ver:10,maxCount:1,maxBytes:25,targetRatio:.9})),['b']);
 });
 
+test('rights diagnostics reject sparse, invalid and implausible records', () => {
+  const { api } = loadWorker(HTML);
+  assert.equal(api.validateRightsDiagnostics({validEvents:99,codes:30,invalid:0,candidates:99}).status,'error');
+  assert.equal(api.validateRightsDiagnostics({validEvents:100,codes:29,invalid:0,candidates:100}).status,'error');
+  assert.equal(api.validateRightsDiagnostics({validEvents:100,codes:30,invalid:12,candidates:112}).status,'error');
+  assert.equal(api.validateRightsDiagnostics({validEvents:100,codes:30,invalid:11,candidates:111}).status,'valid');
+});
+
+test('rights continuity rejects material worsening and allows insufficient samples', () => {
+  const { api } = loadWorker(HTML);
+  assert.equal(api.validateContinuity([{raw:.04,adjusted:.08},{raw:.03,adjusted:.07},{raw:.02,adjusted:.06},{raw:.03,adjusted:.07},{raw:.02,adjusted:.06}]).status,'error');
+  assert.equal(api.validateContinuity([{raw:.04,adjusted:.01}]).status,'unchecked');
+});
+
 test('similarity primitives are stable on edge cases', () => {
   const { api } = loadWorker(HTML);
   assert.deepEqual(Array.from(api.zscore([3, 3, 3])), [0, 0, 0]);

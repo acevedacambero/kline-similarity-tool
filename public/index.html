@@ -343,7 +343,7 @@ function decodeGbbq(buf,keyB64){
   const bin=atob(keyB64),kb=new Uint8Array(bin.length);
   for(let i=0;i<bin.length;i++)kb[i]=bin.charCodeAt(i);
   const kd=new DataView(kb.buffer),src=new Uint8Array(buf),dv=new DataView(buf);
-  const count=Math.min(dv.getUint32(0,true),Math.floor((src.length-4)/29)),out=new Map();
+  const count=Math.min(dv.getUint32(0,true),Math.floor((src.length-4)/29)),out=new Map(),diagnostics={candidates:0,invalid:0,validEvents:0,codes:0};
   let off=4;
   for(let r=0;r<count;r++){
     const clear=new Uint8Array(29),cd=new DataView(clear.buffer);
@@ -364,15 +364,36 @@ function decodeGbbq(buf,keyB64){
     clear.set(src.subarray(off,off+5),24);off+=5;
     let code="";for(let i=1;i<8&&clear[i];i++)code+=String.fromCharCode(clear[i]);
     const d=cd.getUint32(8,true),cat=clear[12];
-    if(cat===1&&/^\d{6}$/.test(code)){
+    if(cat===1){
+      diagnostics.candidates++;
       const ev={d,cash:cd.getFloat32(13,true),rightsPrice:cd.getFloat32(17,true),bonus:cd.getFloat32(21,true),rights:cd.getFloat32(25,true)};
-      if([ev.cash,ev.rightsPrice,ev.bonus,ev.rights].every(Number.isFinite)){
+      const valid=/^\d{6}$/.test(code)&&d>=19900101&&d<=29991231&&[ev.cash,ev.rightsPrice,ev.bonus,ev.rights].every(x=>Number.isFinite(x)&&x>=0&&x<=10000);
+      if(valid){
         if(!out.has(code))out.set(code,[]);out.get(code).push(ev);
-      }
+        diagnostics.validEvents++;
+      }else diagnostics.invalid++;
     }
   }
   for(const a of out.values())a.sort((x,y)=>x.d-y.d);
-  return out;
+  diagnostics.codes=out.size;
+  return {rights:out,diagnostics};
+}
+async function checkRightsContinuity(rights,limit=50){
+  const samples=[];
+  for(const [code,events] of rights){
+    const entry=[...FILES.entries()].find(([key])=>key.endsWith(code));if(!entry)continue;
+    try{
+      const f0=entry[1],f=f0.getFile?await f0.getFile():f0,raw=parseDayBuffer(await f.arrayBuffer());
+      const adjusted={dates:raw.dates,closes:Float64Array.from(raw.closes),vols:Float64Array.from(raw.vols)};applyCorporateActions(adjusted,events);
+      for(const ev of events){
+        let i=0;while(i<raw.dates.length&&raw.dates[i]<ev.d)i++;
+        if(i<=0||i>=raw.dates.length)continue;
+        samples.push({raw:Math.abs(Math.log(raw.closes[i]/raw.closes[i-1])),adjusted:Math.abs(Math.log(adjusted.closes[i]/adjusted.closes[i-1]))});
+        if(samples.length>=limit)return validateContinuity(samples);
+      }
+    }catch(_){}
+  }
+  return validateContinuity(samples);
 }
 function ma20Arr(c){
   const n=c.length,out=new Float64Array(n).fill(NaN);
@@ -391,6 +412,19 @@ function windowStats(c,s,e){
   let m=0;for(const r of rets)m+=r;m/=rets.length||1;
   let sd=0;for(const r of rets)sd+=(r-m)*(r-m);sd=Math.sqrt(sd/(rets.length||1));
   return {mdd,sd,range:maxLog-minLog};
+}
+function validateRightsDiagnostics(d){
+  if(!d||d.validEvents<100)return {status:"error",reason:"有效权息记录不足100条"};
+  if(d.codes<30)return {status:"error",reason:"权息记录覆盖证券不足30只"};
+  if(d.candidates>0&&d.invalid/d.candidates>.10)return {status:"error",reason:"权息坏记录比例超过10%"};
+  return {status:"valid",reason:"结构自检通过"};
+}
+function percentile(values,p){if(!values.length)return null;const a=[...values].sort((x,y)=>x-y);return a[Math.min(a.length-1,Math.floor((a.length-1)*p))]}
+function validateContinuity(samples){
+  if(samples.length<5)return {status:"unchecked",reason:"可验证除权事件不足5个",samples:samples.length};
+  const raw=samples.map(x=>x.raw),adjusted=samples.map(x=>x.adjusted),rawMed=medianOf(raw),adjMed=medianOf(adjusted),rawP90=percentile(raw,.9),adjP90=percentile(adjusted,.9);
+  if(adjMed>rawMed+.03||adjP90>rawP90+.10)return {status:"error",reason:"复权后除权日连续性显著恶化",samples:samples.length,rawMed,adjMed,rawP90,adjP90};
+  return {status:"valid",reason:"连续性抽样通过",samples:samples.length,rawMed,adjMed,rawP90,adjP90};
 }
 function ratioSimilarity(a,b){return a>0&&b>0?Math.exp(-Math.abs(Math.log(a/b))):.5}
 function amplitudeSimilarity(a,b){return .7*ratioSimilarity(a.sd,b.sd)+.3*ratioSimilarity(a.range,b.range)}
@@ -557,12 +591,14 @@ self.onmessage=async ev=>{
     for(const [key,f0] of BENCHMARK_FILES){
       try{const f=f0.getFile?await f0.getFile():f0,p=parseDayBuffer(await f.arrayBuffer());if(p.dates.length)BENCHMARKS.set(key,p)}catch(_){}
     }
-    RIGHTS_STAMP=msg.rightsStamp||"raw";let decodeError=null;
-    try{RIGHTS=msg.gbbq?decodeGbbq(msg.gbbq,msg.keyB64):null}
+    RIGHTS_STAMP=msg.rightsStamp||"raw";let decodeError=null,diagnostics=null,continuity={status:"unchecked",reason:"未提供权息文件",samples:0};
+    try{
+      if(msg.gbbq){const decoded=decodeGbbq(msg.gbbq,msg.keyB64);RIGHTS=decoded.rights;diagnostics=decoded.diagnostics;const structural=validateRightsDiagnostics(diagnostics);if(structural.status!=="valid")throw new Error(structural.reason);continuity=await checkRightsContinuity(RIGHTS);if(continuity.status==="error")throw new Error(continuity.reason)}else RIGHTS=null;
+    }
     catch(err){RIGHTS=new Map();decodeError=err}
     RIGHTS_STATE=resolveRightsState(RIGHTS,decodeError);
     if(RIGHTS_STATE.status!=="valid")RIGHTS_STAMP="raw:"+RIGHTS_STATE.reason;
-    postMessage({type:"rightsStatus",ok:RIGHTS_STATE.status==="valid",status:RIGHTS_STATE.status,reason:RIGHTS_STATE.reason,stocks:RIGHTS?RIGHTS.size:0});return
+    postMessage({type:"rightsStatus",ok:RIGHTS_STATE.status==="valid",status:RIGHTS_STATE.status,reason:RIGHTS_STATE.reason,stocks:RIGHTS?RIGHTS.size:0,diagnostics,continuityStatus:continuity.status,continuityReason:continuity.reason,continuitySamples:continuity.samples});return
   }
   if(msg.type==="series"){
     try{
@@ -849,7 +885,7 @@ function packStk(stk,s,e,benchmarkSeries=null){
   return {startD:stk.dates[s],endD:stk.dates[e],win,nnSmall,fut,benchmark,excess,lagBars,futNn:futNn.length>1?Array.from(resample(new Float64Array(futNn),Math.min(60,futNn.length))):[],lastD:stk.lastD};
 }
 self.__KLINE_TEST_API__={version:ALGO_VER,parseDayBuffer,resolveRightsState,corporateActionFactor,applyCorporateActions,
-  aggregateSeries,periodKey,zscore,cosine,dtwDist,zigAmps,alignCommonDates,sliceSeriesByDate,dedupeOverlaps,mergePerStockCandidates,historicalMaxEnd,recentWindowStarts,recentFreshnessCutoff,clusterHorizonValues,bootstrapWinInterval,isCacheValid,adaptiveCoarseThreshold,boardOfKey,benchmarkKeyFor,indexOnOrBefore,benchmarkReturn,excessReturn,medianOf,summarizeHorizon,ratioSimilarity,amplitudeSimilarity,estimateRecordBytes,selectCacheEvictions};
+  aggregateSeries,periodKey,zscore,cosine,dtwDist,zigAmps,alignCommonDates,sliceSeriesByDate,dedupeOverlaps,mergePerStockCandidates,historicalMaxEnd,recentWindowStarts,recentFreshnessCutoff,clusterHorizonValues,bootstrapWinInterval,isCacheValid,adaptiveCoarseThreshold,boardOfKey,benchmarkKeyFor,indexOnOrBefore,benchmarkReturn,excessReturn,medianOf,summarizeHorizon,ratioSimilarity,amplitudeSimilarity,estimateRecordBytes,selectCacheEvictions,validateRightsDiagnostics,validateContinuity};
 </script>
 
 <script>
