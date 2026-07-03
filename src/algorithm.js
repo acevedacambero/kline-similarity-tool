@@ -1,5 +1,5 @@
 "use strict";
-const ALGO_VER=6;
+const ALGO_VER=7;
 let FILES=null, RIGHTS=new Map(), RIGHTS_STATE={status:"raw",reason:"missing",count:0}, RIGHTS_STAMP="raw", cancelled=false, DB=null;
 
 function zscore(a){
@@ -100,7 +100,10 @@ function applyCorporateActions(series,events){
   let pf=1,vf=1;
   for(let i=dates.length-1;i>=0;i--){
     const f=factors.get(i+1);if(f){pf*=f.p;vf*=f.v}
-    if(pf!==1){closes[i]*=pf;if(opens)opens[i]*=pf;if(highs)highs[i]*=pf;if(lows)lows[i]*=pf}if(vf!==1)vols[i]/=vf;
+    if(pf!==1){closes[i]*=pf;if(opens)opens[i]*=pf;if(highs)highs[i]*=pf;if(lows)lows[i]*=pf}
+    // 前复权价格换算到除权后的新股本口径；成交量必须按相同股本倍数放大。
+    // 对纯送转事件，调整后的“价格 × 成交量”因此仍与原始成交额口径一致。
+    if(vf!==1)vols[i]*=vf;
   }
   return applied;
 }
@@ -236,14 +239,12 @@ function idbOpen(){
     rq.onerror=()=>rej(rq.error);
   });
 }
-function idbLoadAll(db){
+function idbGet(db,key){
   return new Promise(res=>{
-    const map=new Map();
     try{
-      const tx=db.transaction("stocks","readonly").objectStore("stocks").openCursor();
-      tx.onsuccess=()=>{const c=tx.result;if(c){map.set(c.value.key,c.value);c.continue()}else res(map)};
-      tx.onerror=()=>res(map);
-    }catch(_){res(map)}
+      const rq=db.transaction("stocks","readonly").objectStore("stocks").get(key);
+      rq.onsuccess=()=>res(rq.result||null);rq.onerror=()=>res(null);
+    }catch(_){res(null)}
   });
 }
 function idbPutBatch(db,recs){
@@ -260,7 +261,7 @@ async function getStock(key,cache,pending){
   const f0=FILES.get(key);
   if(!f0)return null;
   const file=f0.getFile?await f0.getFile():f0;
-  const hit=cache.get(key);
+  const hit=cache.get(key)||(DB?await idbGet(DB,key):null);
   if(isCacheValid(hit,file,RIGHTS_STAMP,ALGO_VER)){
     return {dates:new Int32Array(hit.dates),closes:new Float64Array(hit.closes),vols:new Float64Array(hit.vols),warn:hit.warn,qStatus:hit.qStatus,qEvents:hit.qEvents,lastD:hit.lastD};
   }
@@ -319,7 +320,8 @@ self.onmessage=async ev=>{
 
 async function runMatch(cfg){
   if(!DB){try{DB=await idbOpen()}catch(_){DB=null}}
-  const cache=DB?await idbLoadAll(DB):new Map();
+  // 缓存按证券惰性读取，避免把全市场历史数组一次性反序列化进内存。
+  const cache=new Map();
   const pending=[];
   const post=o=>postMessage(o);
 

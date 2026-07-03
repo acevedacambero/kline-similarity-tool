@@ -5,7 +5,7 @@ const HTML = findHtml();
 
 test('worker exposes versioned pure algorithm API', () => {
   const { api } = loadWorker(HTML);
-  assert.equal(api.version, 6);
+  assert.equal(api.version, 7);
   assert.equal(typeof api.parseDayBuffer, 'function');
   assert.equal(typeof api.applyCorporateActions, 'function');
 });
@@ -36,7 +36,8 @@ test('corporate actions adjust price and share-changing volume', () => {
   assert.ok(Math.abs(series.opens[0] - 9.8 / 1.2) < 1e-9);
   assert.ok(Math.abs(series.highs[0] - 10.2 / 1.2) < 1e-9);
   assert.ok(Math.abs(series.lows[0] - 9.7 / 1.2) < 1e-9);
-  assert.ok(Math.abs(series.vols[0] - 1000) < 1e-9);
+  assert.ok(Math.abs(series.vols[0] - 1440) < 1e-9);
+  assert.ok(Math.abs(series.closes[0] * series.vols[0] - 10 * 1200) < 1e-9);
 });
 
 test('day parser returns full records and rejects invalid or non-increasing dates', () => {
@@ -128,10 +129,10 @@ test('cross-stock returns are clustered by nearby market periods', () => {
 
 test('cache validity includes algorithm and rights fingerprint', () => {
   const { api } = loadWorker(HTML);
-  const rec = { ver: 6, rv: 'abc', size: 32, mtime: 9 };
-  assert.equal(api.isCacheValid(rec, { size: 32, lastModified: 9 }, 'abc', 6), true);
-  assert.equal(api.isCacheValid(rec, { size: 32, lastModified: 9 }, 'xyz', 6), false);
-  assert.equal(api.isCacheValid({ ...rec, ver: 5 }, { size: 32, lastModified: 9 }, 'abc', 6), false);
+  const rec = { ver: 7, rv: 'abc', size: 32, mtime: 9 };
+  assert.equal(api.isCacheValid(rec, { size: 32, lastModified: 9 }, 'abc', 7), true);
+  assert.equal(api.isCacheValid(rec, { size: 32, lastModified: 9 }, 'xyz', 7), false);
+  assert.equal(api.isCacheValid({ ...rec, ver: 6 }, { size: 32, lastModified: 9 }, 'abc', 7), false);
 });
 
 test('recent windows default to L and always include latest window', () => {

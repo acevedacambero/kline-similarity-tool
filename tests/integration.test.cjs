@@ -134,3 +134,10 @@ test('single-file artifacts are generated from a page template and algorithm sou
   const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
   assert.equal(pkg.scripts.build, 'node scripts/build.cjs');
 });
+
+test('IndexedDB cache is read lazily per security', () => {
+  const html = fs.readFileSync(HTML_PATH, 'utf8');
+  assert.match(html, /function idbGet\(db,key\)/);
+  assert.match(html, /DB\?await idbGet\(DB,key\):null/);
+  assert.doesNotMatch(html, /function idbLoadAll\(/);
+});
