@@ -29,6 +29,11 @@ test('UI analysis consumes the canonical worker OHLC series', () => {
   assert.match(html, /const rows=Array\.from\(adj\.dates/);
 });
 
+test('Eastmoney analysis does not require a TongdaXin day file', () => {
+  const html = fs.readFileSync(HTML_PATH, 'utf8');
+  assert.match(html, /if\(!isEmSource\(\)&&!f\)/);
+});
+
 test('result protocol contains effective statistical samples', () => {
   const html = fs.readFileSync(HTML_PATH, 'utf8');
   assert.match(html, /statRows/);
