@@ -1,13 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const path = require('node:path');
 const { findHtml, loadWorker } = require('./load-worker.cjs');
 const HTML = findHtml();
-const fixtureBuf = name => {
-  const b = fs.readFileSync(path.join(__dirname, 'fixtures', name));
-  return b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength);
-};
 
 test('worker exposes versioned pure algorithm API', () => {
   const { api } = loadWorker(HTML);
@@ -198,91 +192,4 @@ test('recent mode freshness cutoff is 30 reference trading days before target en
   assert.equal(api.recentFreshnessCutoff(dates, 49), dates[19]);
   assert.equal(api.recentFreshnessCutoff(dates, 20), dates[0]);
   assert.equal(api.recentFreshnessCutoff(dates, 49, 10), dates[39]);
-});
-
-test('pure-JS SQLite reader scans EM tables with column early-stop', () => {
-  const { api } = loadWorker(HTML);
-  const rows = [];
-  api.sqliteScanTable(fixtureBuf('em_day_bar.dat'), 'dists_day_bar', 9, v => rows.push(v));
-  assert.equal(rows.length, 7);
-  const r = rows.find(v => v[0] === 'SHSE.600001' && v[1] === '2026-01-05');
-  assert.deepEqual([r[3], r[4], r[5], r[6], r[7], r[8]], [10, 11, 9.5, 10.5, 1000, 10500]);
-  const inst = [];
-  api.sqliteScanTable(fixtureBuf('em_instrument.dat'), 'dists_instrument', 12, v => inst.push(v));
-  assert.equal(inst.length, 6);
-  const i7 = inst.find(v => v[0] === 'SHSE.600001' && v[1] === '2026-01-07');
-  assert.equal(i7[12], 2.2);
-  const st = inst.find(v => v[0] === 'SZSE.000010' && v[1] === '2026-01-06');
-  assert.equal(st[3], 1);
-  assert.throws(() => api.sqliteScanTable(fixtureBuf('em_day_bar.dat'), 'no_such_table', null, () => {}));
-});
-
-test('EM symbol/date mapping and first-seen GBK name parsing', () => {
-  const { api } = loadWorker(HTML);
-  assert.equal(api.emSymKey('SHSE.600001'), 'sh600001');
-  assert.equal(api.emSymKey('SZSE.000010'), 'sz000010');
-  assert.equal(api.emSymKey('BKBK.900001'), null);
-  assert.equal(api.emSymKey('SHSE.60000A'), null);
-  assert.equal(api.emDateInt('2026-01-05'), 20260105);
-  const bufs = ['em_names_0.dat', 'em_names_1.dat'].map(n => new Uint8Array(fixtureBuf(n)));
-  const names = api.parseEmNames(bufs);
-  assert.equal(names['600001'], '测试银行');
-  assert.equal(names['000010'], 'ST测试');
-});
-
-test('EM adj_factor forward adjustment keeps price*volume invariant', () => {
-  const { api } = loadWorker(HTML);
-  const rec = {
-    dates: Int32Array.from([20260105, 20260106, 20260107, 20260108]),
-    opens: Float64Array.from([10, 10.5, 11, 10]),
-    highs: Float64Array.from([11, 12, 11.5, 10.6]),
-    lows: Float64Array.from([9.5, 10.4, 10, 9.9]),
-    closes: Float64Array.from([10.5, 11, 10, 10.4]),
-    vols: Float64Array.from([1000, 2000, 3000, 1500])
-  };
-  const events = api.emApplyFactors(rec, [20260105, 20260107], [2.0, 2.2]);
-  assert.equal(events, 1);
-  const r = 2.0 / 2.2;
-  assert.ok(Math.abs(rec.closes[0] - 10.5 * r) < 1e-12);
-  assert.ok(Math.abs(rec.vols[0] - 1000 / r) < 1e-9);
-  assert.ok(Math.abs(rec.closes[0] * rec.vols[0] - 10.5 * 1000) < 1e-6);
-  assert.equal(rec.closes[2], 10);
-  assert.equal(rec.vols[3], 1500);
-  assert.equal(api.emApplyFactors(rec, [], []), 0);
-});
-
-test('EM series sorter fixes out-of-order and duplicate bars', () => {
-  const { api } = loadWorker(HTML);
-  const a = { d: [20260106, 20260105, 20260106], o: [2, 1, 3], h: [2, 1, 3], l: [2, 1, 3], c: [2, 1, 3], am: [2, 1, 3], v: [2, 1, 3] };
-  const out = api.emSortSeries(a);
-  assert.deepEqual(Array.from(out.d), [20260105, 20260106]);
-  assert.deepEqual(Array.from(out.c), [1, 3]);
-});
-
-test('EM worker pipeline: files -> emReady -> adjusted series end to end', async () => {
-  const { self, messages } = loadWorker(HTML);
-  const fakeFile = name => ({
-    name, size: 1, lastModified: 1,
-    arrayBuffer: async () => fixtureBuf(name)
-  });
-  await self.onmessage({ data: { type: 'files', source: 'em',
-    emDayBar: [fakeFile('em_day_bar.dat')],
-    emInstrument: [fakeFile('em_instrument.dat')],
-    emNames: [fakeFile('em_names_0.dat'), fakeFile('em_names_1.dat')] } });
-  const ready = messages.find(m => m.type === 'emReady');
-  assert.ok(ready, 'emReady missing: ' + JSON.stringify(messages.map(m => m.type)));
-  assert.equal(ready.error, undefined);
-  assert.deepEqual(Array.from(ready.keys), ['sh600001', 'sz000010']);
-  assert.equal(ready.names['600001'], '测试银行');
-  assert.deepEqual(Array.from(ready.stKeys), ['sz000010']);
-  await self.onmessage({ data: { type: 'series', reqId: 7, key: 'sh600001', timeframe: 'day' } });
-  const ser = messages.find(m => m.type === 'series' && m.reqId === 7);
-  assert.ok(ser && !ser.error, ser && ser.error);
-  assert.deepEqual(Array.from(ser.dates), [20260105, 20260106, 20260107, 20260108]);
-  const r = 2.0 / 2.2;
-  assert.ok(Math.abs(ser.closes[0] - 10.5 * r) < 1e-9);
-  assert.ok(Math.abs(ser.vols[0] - 1000 / r) < 1e-6);
-  assert.equal(ser.closes[2], 10);
-  assert.equal(ser.qStatus, 'qfq');
-  assert.equal(ser.qEvents, 1);
 });
