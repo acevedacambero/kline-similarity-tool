@@ -1,5 +1,5 @@
 "use strict";
-const ALGO_VER=8;
+const ALGO_VER=9;
 let FILES=null, RIGHTS=new Map(), RIGHTS_STATE={status:"raw",reason:"missing",count:0}, RIGHTS_STAMP="raw", cancelled=false, DB=null;
 
 function zscore(a){
@@ -212,24 +212,19 @@ function retSlice(c,s,e){
   for(let i=s+1;i<=e;i++)out[i-s-1]=c[i]/c[i-1]-1;
   return out;
 }
-function bsearch(dates,d){
-  let lo=0,hi=dates.length-1;
-  while(lo<=hi){const m=(lo+hi)>>1;if(dates[m]===d)return m;if(dates[m]<d)lo=m+1;else hi=m-1}
-  return -1;
-}
 function alignCommonDates(a,b){
-  const dates=[],ac=[],av=[],bc=[],bv=[];let i=0,j=0;
+  const dates=[],bDates=[],bIndices=[],ac=[],av=[],bc=[],bv=[];let i=0,j=0;
   const ak=a.periods||a.dates,bk=b.periods||b.dates;
   while(i<ak.length&&j<bk.length){
-    if(ak[i]===bk[j]){dates.push(a.dates[i]);ac.push(a.closes[i]);av.push(a.vols[i]);bc.push(b.closes[j]);bv.push(b.vols[j]);i++;j++}
+    if(ak[i]===bk[j]){dates.push(a.dates[i]);bDates.push(b.dates[j]);bIndices.push((b.offset||0)+j);ac.push(a.closes[i]);av.push(a.vols[i]);bc.push(b.closes[j]);bv.push(b.vols[j]);i++;j++}
     else if(ak[i]<bk[j])i++;else j++;
   }
-  return {dates:Int32Array.from(dates),aCloses:Float64Array.from(ac),aVols:Float64Array.from(av),bCloses:Float64Array.from(bc),bVols:Float64Array.from(bv)};
+  return {dates:Int32Array.from(dates),bDates:Int32Array.from(bDates),bIndices:Int32Array.from(bIndices),aCloses:Float64Array.from(ac),aVols:Float64Array.from(av),bCloses:Float64Array.from(bc),bVols:Float64Array.from(bv)};
 }
 function sliceSeriesByDate(stk,startD,endD){
   let lo=0,hi=stk.dates.length;while(lo<hi){const m=(lo+hi)>>1;if(stk.dates[m]<startD)lo=m+1;else hi=m}const s=lo;
   lo=s;hi=stk.dates.length;while(lo<hi){const m=(lo+hi)>>1;if(stk.dates[m]<=endD)lo=m+1;else hi=m}const e=lo;
-  return {dates:stk.dates.subarray(s,e),periods:stk.periods?stk.periods.subarray(s,e):undefined,closes:stk.closes.subarray(s,e),vols:stk.vols.subarray(s,e)};
+  return {dates:stk.dates.subarray(s,e),periods:stk.periods?stk.periods.subarray(s,e):undefined,closes:stk.closes.subarray(s,e),vols:stk.vols.subarray(s,e),offset:s};
 }
 function overlapRatio(a,b,L){return Math.max(0,Math.min(a.e,b.e)-Math.max(a.s,b.s)+1)/L}
 function dedupeOverlaps(rows,threshold,L){
@@ -253,7 +248,6 @@ function recentFreshnessCutoff(dates,refEndIndex,lookback=30){
   const end=Math.min(dates.length-1,Math.max(0,refEndIndex));
   return dates[Math.max(0,end-Math.max(0,Math.floor(lookback)))]||0;
 }
-function wilsonInterval(wins,n,z=1.96){if(!n)return null;const p=wins/n,z2=z*z,den=1+z2/n,mid=(p+z2/(2*n))/den,half=z*Math.sqrt(p*(1-p)/n+z2/(4*n*n))/den;return [mid-half,mid+half]}
 function clusterHorizonValues(rows,horizon,maxGapDays=7){
   const valid=rows.filter(r=>r.fut&&Number.isFinite(r.fut[horizon])).sort((a,b)=>a.endD-b.endD),out=[];let vals=[],anchor=null;
   for(const r of valid){const day=dateOrdinal(r.endD);if(anchor!==null&&day-anchor>maxGapDays){out.push(vals.reduce((a,b)=>a+b,0)/vals.length);vals=[];anchor=day}else if(anchor===null)anchor=day;vals.push(r.fut[horizon])}
@@ -469,7 +463,7 @@ async function runMatch(cfg){
         if(ra.length<L*0.7){skip("同期收益序列不足",key);continue}
         const ret=Math.max(0,cosine(zscore(ra),zscore(rb)));
         if(0.5*cum+0.5*ret<0.3){skip("同期粗筛未通过",key);continue}
-        const s=bsearch(stk.dates,al.dates[0]),e=bsearch(stk.dates,al.dates[al.dates.length-1]);
+        const s=al.bIndices[0],e=al.bIndices[al.bIndices.length-1];
         const peerStk={closes:al.bCloses,vols:al.bVols};peerStk.ma20=ma20Arr(peerStk.closes);
         const peerRef={zcum:zscore(al.aCloses.map(x=>Math.log(x))),zret:zscore(retSlice(al.aCloses,0,al.aCloses.length-1)),
           amps:zigAmps(al.aCloses,cfg.zzth),stats:windowStats(al.aCloses,0,al.aCloses.length-1)};
@@ -605,7 +599,7 @@ function packStk(stk,s,e){
   for(const h of[5,10,20,60])fut["r"+h]=e+h<n?stk.closes[e+h]/stk.closes[e]-1:null;
   let mu=null,md=null;
   if(e+60<n){
-    let pk=stk.closes[e],tr=stk.closes[e];mu=0;md=0;
+    let pk=stk.closes[e];mu=0;md=0;
     for(let i=e+1;i<=e+60;i++){
       const c=stk.closes[i];
       if(c/stk.closes[e]-1>mu)mu=c/stk.closes[e]-1;
@@ -619,4 +613,4 @@ function packStk(stk,s,e){
   return {startD:stk.dates[s],endD:stk.dates[e],win,nnSmall,fut,futNn:futNn.length>1?Array.from(resample(new Float64Array(futNn),Math.min(60,futNn.length))):[],lastD:stk.lastD};
 }
 self.__KLINE_TEST_API__={version:ALGO_VER,parseDayBuffer,resolveRightsState,corporateActionFactor,applyCorporateActions,
-  aggregateSeries,periodKey,zscore,cosine,dtwDist,zigAmps,alignCommonDates,sliceSeriesByDate,dedupeOverlaps,mergePerStockCandidates,historicalMaxEnd,recentWindowStarts,recentFreshnessCutoff,wilsonInterval,clusterHorizonValues,bootstrapWinInterval,isCacheValid,adaptiveCoarseThreshold};
+  aggregateSeries,periodKey,zscore,cosine,dtwDist,zigAmps,alignCommonDates,sliceSeriesByDate,dedupeOverlaps,mergePerStockCandidates,historicalMaxEnd,recentWindowStarts,recentFreshnessCutoff,clusterHorizonValues,bootstrapWinInterval,isCacheValid,adaptiveCoarseThreshold};

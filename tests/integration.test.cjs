@@ -3,7 +3,12 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const { findHtml } = require('./load-worker.cjs');
+const { loadPage } = require('./load-page.cjs');
 const HTML_PATH = findHtml();
+
+test('main page script starts without a runtime exception', () => {
+  assert.doesNotThrow(() => loadPage(HTML_PATH));
+});
 
 test('matching pipeline uses diversified merge and inner-loop cancellation', () => {
   const html = fs.readFileSync(HTML_PATH, 'utf8');
@@ -33,14 +38,12 @@ test('TongdaXin is the only local data source and legacy Eastmoney cache is remo
   const html = fs.readFileSync(HTML_PATH, 'utf8');
   assert.doesNotMatch(html, /id="dataSource"|东方财富|SOURCE==="em"|emReady|scanEmRoot/);
   assert.match(html, /function cleanupLegacyEastmoneyCache\(/);
-  assert.match(html, /key\.startsWith\("em:"\)/);
   assert.match(html, /cleanupLegacyEastmoneyCache\(\)/);
 });
 
 test('result protocol contains effective statistical samples', () => {
   const html = fs.readFileSync(HTML_PATH, 'utf8');
   assert.match(html, /statRows/);
-  assert.match(html, /wilsonInterval/);
   assert.match(html, /有效n=/);
   assert.match(html, /skipReasons/);
   assert.match(html, /skipDetails/);
@@ -134,6 +137,8 @@ test('CSV export starts with code and omits ranking values', () => {
   assert.doesNotMatch(html, /const head=\["排名"/);
   assert.doesNotMatch(html, /lines\.push\(\[i\+1,/);
   assert.match(html, /"粗筛阈值","粗筛候选","DTW候选","DTW带宽","跳过原因"/);
+  assert.doesNotMatch(html, /lastStatRows\.includes\(r\)/);
+  assert.match(html, /statSampleKeys\.has\(rowKey\(r\)\)/);
 });
 
 test('result note exposes the leading rejection reasons', () => {
@@ -192,7 +197,20 @@ test('daily weekly and monthly matching use one canonical timeframe pipeline', (
 test('Cloudflare build runs tests and the shared policy gate', () => {
   const root = path.resolve(__dirname, '..');
   const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
-  assert.match(pkg.scripts['build:cf'], /npm test/);
+  assert.match(pkg.scripts['build:cf'], /^node scripts\/build\.cjs --stamp && node --test/);
   assert.match(pkg.scripts['build:cf'], /policy-check\.cjs --require-stamp/);
+  assert.match(pkg.scripts.test, /^node scripts\/build\.cjs --check/);
   assert.equal(fs.existsSync(path.join(root, 'scripts', 'policy-check.cjs')), true);
+});
+
+test('legacy cache cleanup is bounded and only runs once', () => {
+  const html = fs.readFileSync(HTML_PATH, 'utf8');
+  assert.match(html, /kline_em_cache_cleaned_v1/);
+  assert.match(html, /IDBKeyRange\.bound\("em:","em:\\uffff"\)/);
+});
+
+test('worker replacement settles pending series requests and CSV URLs are revoked', () => {
+  const html = fs.readFileSync(HTML_PATH, 'utf8');
+  assert.match(html, /function settleSeriesWaiters\(/);
+  assert.match(html, /URL\.revokeObjectURL\(csvUrl\)/);
 });

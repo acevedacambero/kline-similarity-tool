@@ -154,8 +154,8 @@ details summary{cursor:pointer;font-size:13px;color:#2a78d6;margin-top:8px}
 <script>
 "use strict";
 const $=id=>document.getElementById(id);
-const UI_ALGO_VER=8;
-let files=new Map(), names={}, gbbqFile=null, rightsOK=false, rightsState="raw", ref=null, worker=null, lastRows=null, lastStatRows=null, lastMeta=null, referenceDates=null, sortKey="score", sortAsc=false;
+const UI_ALGO_VER=9;
+let files=new Map(), names={}, gbbqFile=null, rightsState="raw", ref=null, worker=null, lastRows=null, lastStatRows=null, lastMeta=null, referenceDates=null, sortKey="score", sortAsc=false;
 let seriesSeq=0;const seriesWait=new Map();
 
 const A_PREFIX={sh:["600","601","603","605","688","51","56","58"],sz:["000","001","002","003","300","301","15","16"],bj:["43","83","87","92"]};
@@ -172,15 +172,18 @@ checkBrowserCapabilities();
 
 function cleanupLegacyEastmoneyCache(){
   if(typeof indexedDB==="undefined")return;
+  const marker="kline_em_cache_cleaned_v1";
+  try{if(localStorage.getItem(marker)==="1")return}catch(_){}
   try{
     const rq=indexedDB.open("kline_tool_v2",1);
     rq.onupgradeneeded=()=>{if(!rq.result.objectStoreNames.contains("stocks"))rq.result.createObjectStore("stocks",{keyPath:"key"})};
     rq.onsuccess=()=>{
       const db=rq.result;
       try{
-        const tx=db.transaction("stocks","readwrite"),st=tx.objectStore("stocks"),cur=st.openCursor();
-        cur.onsuccess=()=>{const c=cur.result;if(!c)return;const key=String(c.key);if(key.startsWith("em:"))c.delete();c.continue()};
-        tx.oncomplete=tx.onerror=tx.onabort=()=>db.close();
+        const tx=db.transaction("stocks","readwrite"),st=tx.objectStore("stocks"),range=IDBKeyRange.bound("em:","em:\uffff"),cur=st.openCursor(range);
+        cur.onsuccess=()=>{const c=cur.result;if(!c)return;c.delete();c.continue()};
+        tx.oncomplete=()=>{try{localStorage.setItem(marker,"1")}catch(_){}db.close()};
+        tx.onerror=tx.onabort=()=>db.close();
       }catch(_){db.close()}
     };
   }catch(_){}
@@ -197,7 +200,7 @@ $("btnDir").onclick=async()=>{
     return;
   }
   setMsg("读取","正在扫描目录…（仅本地读取，不会上传）");
-  files=new Map();names={};gbbqFile=null;rightsOK=false;
+  files=new Map();names={};gbbqFile=null;
   const getDir=async(h,path)=>{let cur=h;for(const seg of path){try{cur=await cur.getDirectoryHandle(seg)}catch(_){return null}}return cur};
   let vip=await getDir(root,["vipdoc"])||root;
   const tnf=[];
@@ -218,7 +221,7 @@ $("btnDir").onclick=async()=>{
 };
 
 $("dir").addEventListener("change",async e=>{
-  files=new Map();names={};gbbqFile=null;rightsOK=false;
+  files=new Map();names={};gbbqFile=null;
   const tnf=[];
   for(const f of e.target.files){
     const p=(f.webkitRelativePath||f.name).replace(/\\/g,"/");
@@ -265,14 +268,18 @@ async function finishLoad(tnf){
 }
 
 let workerUrl=null;
+function settleSeriesWaiters(error){
+  for(const done of seriesWait.values())done({error});
+  seriesWait.clear();
+}
 async function initWorker(){
-  if(worker)worker.terminate();
+  if(worker){settleSeriesWaiters("数据目录已切换，请重新分析");worker.terminate()}
   if(workerUrl){URL.revokeObjectURL(workerUrl);workerUrl=null}
   const src=$("workerSrc").textContent;
   workerUrl=URL.createObjectURL(new Blob([src],{type:"application/javascript"}));
   worker=new Worker(workerUrl);
   worker.onmessage=onWorkerMsg;
-  worker.onerror=e=>{setMsg("匹配","Worker错误："+e.message);matchDone()}
+  worker.onerror=e=>{settleSeriesWaiters("Worker错误："+e.message);setMsg("匹配","Worker错误："+e.message);matchDone()}
   let gbbq=null,rightsStamp="raw";
   if(gbbqFile){
     try{gbbq=await gbbqFile.arrayBuffer();rightsStamp=`${gbbqFile.size}:${gbbqFile.lastModified}`}catch(_){}
@@ -312,7 +319,6 @@ function loadPrefs(){
   }catch(_){}
 }
 loadPrefs();
-syncSourceUI(false);
 document.addEventListener("change",e=>{const t=e.target;if(t&&(PREF_IDS.includes(t.id)||t.name==="mode"))savePrefs()});
 
 let savedIsolate=$("isolate").checked;
@@ -557,7 +563,7 @@ function matchDone(){
 function onWorkerMsg(ev){
   const m=ev.data;
   if(m.type==="rightsStatus"){
-    rightsOK=!!m.ok;rightsState=m.status||"error";
+    rightsState=m.status||"error";
     setMsg("复权",m.ok?`真实权息数据已解密，覆盖 ${m.stocks} 只证券；后续分析与匹配均使用前复权。`:`权息状态：${m.reason||"读取失败"}；将明确使用原始价格。`);
   }else if(m.type==="series"){
     const done=seriesWait.get(m.reqId);if(done){seriesWait.delete(m.reqId);done(m)}
@@ -712,21 +718,24 @@ function drawOverlay(r){
 
 $("btnCsv").onclick=()=>{
   if(!lastRows)return;
+  const rowKey=r=>`${r.key}|${r.startD}|${r.endD}`;
+  const statSampleKeys=new Set((lastStatRows||[]).map(rowKey));
   const head=["代码","名称","开始","结束","模式","周期","近期范围","综合分","累计走势","收益序列","拐点","均线","量能","DTW","复权存疑","权息状态","统计样本","算法版本","粗筛阈值","粗筛候选","DTW候选","DTW带宽","跳过原因","r5","r10","r20","r60","max60涨","max60撤"];
   const lines=[head.join(",")];
-  lastRows.forEach((r,i)=>{
+  lastRows.forEach(r=>{
     lines.push([r.key.slice(2),(names[r.key]||"").replace(/,/g,""),r.startD,r.endD,lastMeta.mode,lastMeta.timeframe||"day",lastMeta.recentBars??"",r.score.toFixed(4),
       r.sub.cum.toFixed(3),r.sub.ret.toFixed(3),r.sub.zig.toFixed(3),r.sub.ma.toFixed(3),r.sub.vol.toFixed(3),
-      r.sub.dtw!==undefined?r.sub.dtw.toFixed(3):"",r.warn?1:0,rightsState,lastStatRows&&lastStatRows.includes(r)?1:0,UI_ALGO_VER,
+      r.sub.dtw!==undefined?r.sub.dtw.toFixed(3):"",r.warn?1:0,rightsState,statSampleKeys.has(rowKey(r))?1:0,UI_ALGO_VER,
       lastMeta.settings.coarseThreshold,lastMeta.settings.K_COARSE,lastMeta.settings.K_DTW,lastMeta.settings.dtwBand,Object.entries(lastMeta.skipReasons||{}).map(([k,n])=>k+":"+n).join(";"),
       ...[r.fut.r5,r.fut.r10,r.fut.r20,r.fut.r60,r.fut.maxUp,r.fut.maxDn].map(x=>x===null||x===undefined?"":(x*100).toFixed(2))
     ].join(","));
   });
   const blob=new Blob(["﻿"+lines.join("\r\n")],{type:"text/csv"});
   const a=document.createElement("a");
-  a.href=URL.createObjectURL(blob);
+  const csvUrl=URL.createObjectURL(blob);a.href=csvUrl;
   a.download="相似匹配_"+$("code").value+"_"+(lastMeta.timeframe||"day")+"_"+$("d1").value+"_"+$("d2").value+".csv";
   a.click();
+  setTimeout(()=>URL.revokeObjectURL(csvUrl),0);
 };
 </script>
 </body>
