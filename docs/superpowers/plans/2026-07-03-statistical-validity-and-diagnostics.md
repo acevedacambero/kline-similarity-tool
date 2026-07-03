@@ -375,7 +375,7 @@ Collect hit keys in `CACHE_TOUCHES`, assign one incremented batch number per mat
 
 - [ ] **Step 5: Add integration tests for fallback and warnings**
 
-Require the Worker to use `maxCount:6000`, `targetRatio:.9`, quota20%, and the page to render cache maintenance warnings without aborting results.
+Require the Worker to use `maxCount:7000`, `targetRatio:.9`, quota20%, and the page to render cache maintenance warnings without aborting results.
 
 - [ ] **Step 6: Build, test and commit Task 5**
 
