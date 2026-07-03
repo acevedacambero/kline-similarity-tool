@@ -371,11 +371,15 @@ function rankPlacebos(target,pool){
   return pool.filter(p=>p.key!==target.key).map(p=>({p,rank:[p.board===target.board?0:1,Math.abs(dateOrdinal(p.endD)-dateOrdinal(target.endD)),Math.abs(Math.log((p.sd||1e-9)/(target.sd||1e-9))),p.key,p.endD]})).sort((a,b)=>{for(let i=0;i<a.rank.length;i++){if(a.rank[i]<b.rank[i])return-1;if(a.rank[i]>b.rank[i])return 1}return 0}).map(x=>x.p);
 }
 function selectReturnFamily(rows,horizon){return rows.some(r=>Number.isFinite(r.excess?.[horizon]))?"excess":"fut"}
+function preparePlaceboRankings(matches,pool,horizon,family){
+  return matches.map(match=>({match,candidates:rankPlacebos(match,pool).filter(p=>Number.isFinite(p[family]?.[horizon]))}));
+}
 function placeboSummary(matches,pool,horizon,rounds=200,seed=20260703,family=selectReturnFamily(matches,horizon)){
   const matchVals=matches.map(m=>m[family]?.[horizon]).filter(Number.isFinite),matchMedian=medianOf(matchVals),matchWin=matchVals.length?matchVals.filter(x=>x>0).length/matchVals.length:null,rnd=seededRandom(seed),roundStats=[];
+  const prepared=preparePlaceboRankings(matches,pool,horizon,family);
   for(let r=0;r<rounds;r++){
     const used=new Set(),vals=[];
-    for(const m of matches){const ranked=rankPlacebos(m,pool).filter(p=>Number.isFinite(p[family]?.[horizon])&&!used.has(p.id));if(!ranked.length)continue;const band=ranked.slice(0,Math.min(5,ranked.length)),p=band[Math.floor(rnd()*band.length)];used.add(p.id);vals.push(p[family][horizon])}
+    for(const item of prepared){const band=[];for(const p of item.candidates){if(!used.has(p.id)){band.push(p);if(band.length===5)break}}if(!band.length)continue;const p=band[Math.floor(rnd()*band.length)];used.add(p.id);vals.push(p[family][horizon])}
     if(vals.length)roundStats.push({n:vals.length,win:vals.filter(x=>x>0).length/vals.length,median:medianOf(vals)});
   }
   return {family,rounds:roundStats.length,pairedN:roundStats.length?Math.round(roundStats.reduce((n,x)=>n+x.n,0)/roundStats.length):0,matchWin,matchMedian,placeboWin:roundStats.length?roundStats.reduce((n,x)=>n+x.win,0)/roundStats.length:null,placeboMedian:roundStats.length?medianOf(roundStats.map(x=>x.median)):null,betterRate:roundStats.length&&matchMedian!==null?roundStats.filter(x=>matchMedian>x.median).length/roundStats.length:null};
@@ -770,4 +774,4 @@ function packStk(stk,s,e,benchmarkSeries=null){
   return {startD:stk.dates[s],endD:stk.dates[e],win,nnSmall,fut,benchmark,excess,lagBars,futNn:futNn.length>1?Array.from(resample(new Float64Array(futNn),Math.min(60,futNn.length))):[],lastD:stk.lastD};
 }
 self.__KLINE_TEST_API__={version:ALGO_VER,parseDayBuffer,resolveRightsState,corporateActionFactor,applyCorporateActions,
-  aggregateSeries,periodKey,zscore,cosine,dtwDist,zigAmps,alignCommonDates,sliceSeriesByDate,dedupeOverlaps,mergePerStockCandidates,historicalMaxEnd,recentWindowStarts,recentFreshnessCutoff,clusterHorizonValues,bootstrapWinInterval,isCacheValid,adaptiveCoarseThreshold,boardOfKey,benchmarkKeyFor,indexOnOrBefore,benchmarkReturn,excessReturn,medianOf,summarizeHorizon,ratioSimilarity,amplitudeSimilarity,estimateRecordBytes,selectCacheEvictions,cacheWriteBackKeys,validateRightsDiagnostics,validateContinuity,normalizeFunnel,samplePlaceboStarts,rankPlacebos,selectReturnFamily,placeboSummary,forwardReturns};
+  aggregateSeries,periodKey,zscore,cosine,dtwDist,zigAmps,alignCommonDates,sliceSeriesByDate,dedupeOverlaps,mergePerStockCandidates,historicalMaxEnd,recentWindowStarts,recentFreshnessCutoff,clusterHorizonValues,bootstrapWinInterval,isCacheValid,adaptiveCoarseThreshold,boardOfKey,benchmarkKeyFor,indexOnOrBefore,benchmarkReturn,excessReturn,medianOf,summarizeHorizon,ratioSimilarity,amplitudeSimilarity,estimateRecordBytes,selectCacheEvictions,cacheWriteBackKeys,validateRightsDiagnostics,validateContinuity,normalizeFunnel,samplePlaceboStarts,rankPlacebos,selectReturnFamily,preparePlaceboRankings,placeboSummary,forwardReturns};

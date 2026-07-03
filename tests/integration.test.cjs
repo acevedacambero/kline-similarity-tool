@@ -94,6 +94,12 @@ test('benchmark status explicitly reports missing local indexes', () => {
   assert.ok(html.includes('展示绝对收益'));
 });
 
+test('placebo simulation precomputes rankings outside the round loop', () => {
+  const html=fs.readFileSync(HTML_PATH,'utf8');
+  assert.match(html,/const prepared=preparePlaceboRankings\(matches,pool,horizon,family\)/);
+  assert.doesNotMatch(html,/for\(let r=0;r<rounds;r\+\+\)[\s\S]{0,500}rankPlacebos\(/);
+});
+
 test('result protocol contains effective statistical samples', () => {
   const html = fs.readFileSync(HTML_PATH, 'utf8');
   assert.match(html, /statRows/);

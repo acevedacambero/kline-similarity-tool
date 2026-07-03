@@ -214,6 +214,15 @@ test('return family falls back to absolute returns when excess is unavailable', 
   assert.equal(api.selectReturnFamily([{fut:{r5:.1},excess:{r5:.03}}],'r5'),'excess');
 });
 
+test('placebo candidates are ranked once per match before simulation rounds', () => {
+  const { api } = loadWorker(HTML);
+  const matches=[{key:'sh600000',board:'main',endD:20260110,sd:.02,excess:{r5:.03}}];
+  const pool=[{id:'p1',key:'sh600001',board:'main',endD:20260110,sd:.02,excess:{r5:.01}},{id:'p2',key:'sh600002',board:'main',endD:20260111,sd:.03,excess:{r5:.02}}];
+  const prepared=api.preparePlaceboRankings(matches,pool,'r5','excess');
+  assert.equal(prepared.length,1);
+  assert.deepEqual(Array.from(prepared[0].candidates,x=>x.id),['p1','p2']);
+});
+
 test('similarity primitives are stable on edge cases', () => {
   const { api } = loadWorker(HTML);
   assert.deepEqual(Array.from(api.zscore([3, 3, 3])), [0, 0, 0]);
