@@ -6,6 +6,10 @@ const { findHtml } = require('./load-worker.cjs');
 const { loadPage } = require('./load-page.cjs');
 const HTML_PATH = findHtml();
 
+test('page uses algorithm version ten', () => {
+  assert.match(fs.readFileSync(HTML_PATH,'utf8'),/UI_ALGO_VER=10/);
+});
+
 test('main page script starts without a runtime exception', () => {
   assert.doesNotThrow(() => loadPage(HTML_PATH));
 });
@@ -39,6 +43,42 @@ test('TongdaXin is the only local data source and legacy Eastmoney cache is remo
   assert.doesNotMatch(html, /id="dataSource"|东方财富|SOURCE==="em"|emReady|scanEmRoot/);
   assert.match(html, /function cleanupLegacyEastmoneyCache\(/);
   assert.match(html, /cleanupLegacyEastmoneyCache\(\)/);
+});
+
+test('local benchmark indexes are discovered outside the stock universe', () => {
+  const html=fs.readFileSync(HTML_PATH,'utf8');
+  assert.match(html,/const INDEX_KEYS=new Set\(\["sh000300","sz399006","sh000688","bj899050"\]\)/);
+  assert.match(html,/benchmarks:\[\.\.\.benchmarkFiles\.entries\(\)\]/);
+});
+
+test('result UI and CSV expose excess returns and sample maturity', () => {
+  const html=fs.readFileSync(HTML_PATH,'utf8');
+  for(const marker of ['超额簇级胜率','完整率','中位滞后','基准收益r5','超额收益r5'])assert.ok(html.includes(marker),marker);
+});
+
+test('amplitude similarity has a default weight of ten', () => {
+  const html=fs.readFileSync(HTML_PATH,'utf8');
+  assert.match(html,/id="wAmp" value="10"/);
+  assert.match(html,/amp:\+\$\("wAmp"\)\.value/);
+});
+
+test('cache maintenance uses the approved count and quota limits', () => {
+  const html=fs.readFileSync(HTML_PATH,'utf8');
+  assert.match(html,/maxCount:7000/);
+  assert.match(html,/quota\s*\*\s*\.2/);
+  assert.match(html,/targetRatio:\.9/);
+  assert.ok(html.includes('cacheStatus'));
+});
+
+test('matching funnel is visible and exportable', () => {
+  const html=fs.readFileSync(HTML_PATH,'utf8');
+  assert.match(html,/id="funnel"/);
+  for(const marker of ['证券','窗口','粗筛','全局','精排','去重','展示'])assert.ok(html.includes(marker),marker);
+});
+
+test('placebo baseline is shown with its fixed round count', () => {
+  const html=fs.readFileSync(HTML_PATH,'utf8');
+  assert.ok(html.includes('随机基线（200轮）'));
 });
 
 test('result protocol contains effective statistical samples', () => {

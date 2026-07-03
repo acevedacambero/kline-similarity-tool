@@ -104,6 +104,7 @@ details summary{cursor:pointer;font-size:13px;color:#2a78d6;margin-top:8px}
         <span class="wgt">均线结构<input type="number" id="wMa" value="15"></span>
         <span class="wgt">量能结构<input type="number" id="wVol" value="10"></span>
         <span class="wgt">波动/回撤<input type="number" id="wVdd" value="10"></span>
+        <span class="wgt">幅度相似<input type="number" id="wAmp" value="10"></span>
         <span class="wgt">DTW重排权重%<input type="number" id="wDtw" value="15"></span>
       </div>
     </details>
@@ -135,6 +136,7 @@ details summary{cursor:pointer;font-size:13px;color:#2a78d6;margin-top:8px}
 
 <div class="panel" id="matchPanel" style="display:none">
   <h2 id="matchTitle">匹配结果</h2>
+  <div class="hint" id="funnel"></div>
   <div class="stats" id="btStats"></div>
   <p class="hint" id="btNote"></p>
   <div style="margin:6px 0"><button id="btnCsv" class="sec mini">导出CSV</button></div>
@@ -149,8 +151,47 @@ details summary{cursor:pointer;font-size:13px;color:#2a78d6;margin-top:8px}
 <script id="gbbqKey" type="text/plain">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</script>
 <script id="workerSrc" type="text/plain">
 "use strict";
-const ALGO_VER=9;
-let FILES=null, RIGHTS=new Map(), RIGHTS_STATE={status:"raw",reason:"missing",count:0}, RIGHTS_STAMP="raw", cancelled=false, DB=null;
+const ALGO_VER=10;
+let FILES=null, BENCHMARK_FILES=new Map(), BENCHMARKS=new Map(), RIGHTS=new Map(), RIGHTS_STATE={status:"raw",reason:"missing",count:0}, RIGHTS_STAMP="raw", cancelled=false, DB=null, CACHE_TOUCHES=new Set();
+
+function boardOfKey(key){
+  const mkt=key.slice(0,2),c=key.slice(2);
+  if(mkt==="bj")return "bj";
+  if(c.startsWith("68"))return "kcb";
+  if(c.startsWith("30"))return "cyb";
+  if((mkt==="sh"&&/^(51|56|58)/.test(c))||(mkt==="sz"&&/^(15|16)/.test(c)))return "etf";
+  if((mkt==="sh"&&c.startsWith("60"))||(mkt==="sz"&&c.startsWith("00")))return "main";
+  return null;
+}
+function benchmarkKeyFor(key){
+  return {main:"sh000300",cyb:"sz399006",kcb:"sh000688",bj:"bj899050",etf:"sh000300"}[boardOfKey(key)]||null;
+}
+function indexOnOrBefore(dates,d){
+  let lo=0,hi=dates.length-1,ans=-1;
+  while(lo<=hi){const m=(lo+hi)>>1;if(dates[m]<=d){ans=m;lo=m+1}else hi=m-1}
+  return ans;
+}
+function benchmarkReturn(series,startD,endD){
+  if(!series||!series.dates||!series.closes)return null;
+  const s=indexOnOrBefore(series.dates,startD),e=indexOnOrBefore(series.dates,endD);
+  if(s<0||e<=s||!Number.isFinite(series.closes[s])||!Number.isFinite(series.closes[e])||series.closes[s]<=0)return null;
+  return series.closes[e]/series.closes[s]-1;
+}
+function excessReturn(stockReturn,indexReturn){
+  return Number.isFinite(stockReturn)&&Number.isFinite(indexReturn)?(1+stockReturn)/(1+indexReturn)-1:null;
+}
+function medianOf(values){
+  if(!values.length)return null;
+  const a=[...values].sort((x,y)=>x-y),m=a.length>>1;
+  return a.length%2?a[m]:(a[m-1]+a[m])/2;
+}
+function summarizeHorizon(rows,horizon){
+  const valid=rows.filter(r=>Number.isFinite(r.fut?.[horizon]));
+  const excess=rows.filter(r=>Number.isFinite(r.excess?.[horizon]));
+  const lags=valid.map(r=>r.lagBars?.[horizon]).filter(Number.isFinite);
+  return {totalN:rows.length,rawN:valid.length,excessN:excess.length,missingN:rows.length-valid.length,
+    completeRate:rows.length?valid.length/rows.length:0,medianLagBars:medianOf(lags)};
+}
 
 function zscore(a){
   const n=a.length;let m=0;for(let i=0;i<n;i++)m+=a[i];m/=n;
@@ -303,7 +344,7 @@ function decodeGbbq(buf,keyB64){
   const bin=atob(keyB64),kb=new Uint8Array(bin.length);
   for(let i=0;i<bin.length;i++)kb[i]=bin.charCodeAt(i);
   const kd=new DataView(kb.buffer),src=new Uint8Array(buf),dv=new DataView(buf);
-  const count=Math.min(dv.getUint32(0,true),Math.floor((src.length-4)/29)),out=new Map();
+  const count=Math.min(dv.getUint32(0,true),Math.floor((src.length-4)/29)),out=new Map(),diagnostics={candidates:0,invalid:0,validEvents:0,codes:0};
   let off=4;
   for(let r=0;r<count;r++){
     const clear=new Uint8Array(29),cd=new DataView(clear.buffer);
@@ -324,15 +365,36 @@ function decodeGbbq(buf,keyB64){
     clear.set(src.subarray(off,off+5),24);off+=5;
     let code="";for(let i=1;i<8&&clear[i];i++)code+=String.fromCharCode(clear[i]);
     const d=cd.getUint32(8,true),cat=clear[12];
-    if(cat===1&&/^\d{6}$/.test(code)){
+    if(cat===1){
+      diagnostics.candidates++;
       const ev={d,cash:cd.getFloat32(13,true),rightsPrice:cd.getFloat32(17,true),bonus:cd.getFloat32(21,true),rights:cd.getFloat32(25,true)};
-      if([ev.cash,ev.rightsPrice,ev.bonus,ev.rights].every(Number.isFinite)){
+      const valid=/^\d{6}$/.test(code)&&d>=19900101&&d<=29991231&&[ev.cash,ev.rightsPrice,ev.bonus,ev.rights].every(x=>Number.isFinite(x)&&x>=0&&x<=10000);
+      if(valid){
         if(!out.has(code))out.set(code,[]);out.get(code).push(ev);
-      }
+        diagnostics.validEvents++;
+      }else diagnostics.invalid++;
     }
   }
   for(const a of out.values())a.sort((x,y)=>x.d-y.d);
-  return out;
+  diagnostics.codes=out.size;
+  return {rights:out,diagnostics};
+}
+async function checkRightsContinuity(rights,limit=50){
+  const samples=[];
+  for(const [code,events] of rights){
+    const entry=[...FILES.entries()].find(([key])=>key.endsWith(code));if(!entry)continue;
+    try{
+      const f0=entry[1],f=f0.getFile?await f0.getFile():f0,raw=parseDayBuffer(await f.arrayBuffer());
+      const adjusted={dates:raw.dates,closes:Float64Array.from(raw.closes),vols:Float64Array.from(raw.vols)};applyCorporateActions(adjusted,events);
+      for(const ev of events){
+        let i=0;while(i<raw.dates.length&&raw.dates[i]<ev.d)i++;
+        if(i<=0||i>=raw.dates.length)continue;
+        samples.push({raw:Math.abs(Math.log(raw.closes[i]/raw.closes[i-1])),adjusted:Math.abs(Math.log(adjusted.closes[i]/adjusted.closes[i-1]))});
+        if(samples.length>=limit)return validateContinuity(samples);
+      }
+    }catch(_){}
+  }
+  return validateContinuity(samples);
 }
 function ma20Arr(c){
   const n=c.length,out=new Float64Array(n).fill(NaN);
@@ -341,17 +403,32 @@ function ma20Arr(c){
   return out;
 }
 function windowStats(c,s,e){
-  let pk=0,mdd=0;
+  let pk=0,mdd=0,minLog=Infinity,maxLog=-Infinity;
   const rets=[];
   for(let i=s;i<=e;i++){
-    if(c[i]>pk)pk=c[i];
+    if(c[i]>pk)pk=c[i];const lc=Math.log(Math.max(c[i],1e-9));if(lc<minLog)minLog=lc;if(lc>maxLog)maxLog=lc;
     const dd=c[i]/pk-1;if(dd<mdd)mdd=dd;
     if(i>s)rets.push(c[i]/c[i-1]-1);
   }
   let m=0;for(const r of rets)m+=r;m/=rets.length||1;
   let sd=0;for(const r of rets)sd+=(r-m)*(r-m);sd=Math.sqrt(sd/(rets.length||1));
-  return {mdd,sd};
+  return {mdd,sd,range:maxLog-minLog};
 }
+function validateRightsDiagnostics(d){
+  if(!d||d.validEvents<100)return {status:"error",reason:"有效权息记录不足100条"};
+  if(d.codes<30)return {status:"error",reason:"权息记录覆盖证券不足30只"};
+  if(d.candidates>0&&d.invalid/d.candidates>.10)return {status:"error",reason:"权息坏记录比例超过10%"};
+  return {status:"valid",reason:"结构自检通过"};
+}
+function percentile(values,p){if(!values.length)return null;const a=[...values].sort((x,y)=>x-y);return a[Math.min(a.length-1,Math.floor((a.length-1)*p))]}
+function validateContinuity(samples){
+  if(samples.length<5)return {status:"unchecked",reason:"可验证除权事件不足5个",samples:samples.length};
+  const raw=samples.map(x=>x.raw),adjusted=samples.map(x=>x.adjusted),rawMed=medianOf(raw),adjMed=medianOf(adjusted),rawP90=percentile(raw,.9),adjP90=percentile(adjusted,.9);
+  if(adjMed>rawMed+.03||adjP90>rawP90+.10)return {status:"error",reason:"复权后除权日连续性显著恶化",samples:samples.length,rawMed,adjMed,rawP90,adjP90};
+  return {status:"valid",reason:"连续性抽样通过",samples:samples.length,rawMed,adjMed,rawP90,adjP90};
+}
+function ratioSimilarity(a,b){return a>0&&b>0?Math.exp(-Math.abs(Math.log(a/b))):.5}
+function amplitudeSimilarity(a,b){return .7*ratioSimilarity(a.sd,b.sd)+.3*ratioSimilarity(a.range,b.range)}
 function logSlice(c,s,e){
   const out=new Float64Array(e-s+1);
   for(let i=s;i<=e;i++)out[i-s]=Math.log(Math.max(c[i],1e-9));
@@ -398,9 +475,9 @@ function recentFreshnessCutoff(dates,refEndIndex,lookback=30){
   const end=Math.min(dates.length-1,Math.max(0,refEndIndex));
   return dates[Math.max(0,end-Math.max(0,Math.floor(lookback)))]||0;
 }
-function clusterHorizonValues(rows,horizon,maxGapDays=7){
-  const valid=rows.filter(r=>r.fut&&Number.isFinite(r.fut[horizon])).sort((a,b)=>a.endD-b.endD),out=[];let vals=[],anchor=null;
-  for(const r of valid){const day=dateOrdinal(r.endD);if(anchor!==null&&day-anchor>maxGapDays){out.push(vals.reduce((a,b)=>a+b,0)/vals.length);vals=[];anchor=day}else if(anchor===null)anchor=day;vals.push(r.fut[horizon])}
+function clusterHorizonValues(rows,horizon,maxGapDays=7,family="fut"){
+  const valid=rows.filter(r=>r[family]&&Number.isFinite(r[family][horizon])).sort((a,b)=>a.endD-b.endD),out=[];let vals=[],anchor=null;
+  for(const r of valid){const day=dateOrdinal(r.endD);if(anchor!==null&&day-anchor>maxGapDays){out.push(vals.reduce((a,b)=>a+b,0)/vals.length);vals=[];anchor=day}else if(anchor===null)anchor=day;vals.push(r[family][horizon])}
   if(vals.length)out.push(vals.reduce((a,b)=>a+b,0)/vals.length);return out;
 }
 function bootstrapWinInterval(values,iterations=1000,seed=20260703){
@@ -413,12 +490,50 @@ function adaptiveCoarseThreshold(base,L){
   // 短窗口（周线/月线常见）重采样为32点后余弦噪声更大，按窗口长度线性放宽门槛，最多降低0.15。
   return Math.max(0.3,base-Math.min(0.15,Math.max(0,48-L)*0.005));
 }
+function estimateRecordBytes(r){
+  return (r.dates?.byteLength||0)+(r.closes?.byteLength||0)+(r.vols?.byteLength||0)+256;
+}
+function selectCacheEvictions(records,{ver,maxCount,maxBytes=Infinity,targetRatio=.9}){
+  const stale=records.filter(r=>r.ver!==ver).sort((a,b)=>(a.lastAccess||0)-(b.lastAccess||0));
+  const live=records.filter(r=>r.ver===ver).sort((a,b)=>(a.lastAccess||0)-(b.lastAccess||0));
+  const ordered=[...stale,...live],removed=[],gone=new Set();
+  let count=records.length,bytes=records.reduce((n,r)=>n+(r.bytes??estimateRecordBytes(r)),0);
+  const targetCount=Math.max(1,Math.floor(maxCount*targetRatio)),targetBytes=Number.isFinite(maxBytes)?maxBytes*targetRatio:Infinity;
+  for(const r of ordered){
+    const mustRemove=r.ver!==ver||count>targetCount||bytes>targetBytes;
+    if(!mustRemove)break;
+    removed.push(r.key);gone.add(r.key);count--;bytes-=r.bytes??estimateRecordBytes(r);
+  }
+  return removed;
+}
+function normalizeFunnel(f){
+  const keys=["stocks","windows","coarsePassed","globalKept","refined","dtw","deduped","shown"],out={};for(const k of keys)out[k]=Math.max(0,Math.floor(f[k]||0));
+  if(out.coarsePassed>out.windows||out.globalKept>out.coarsePassed||out.refined>out.globalKept||out.dtw>out.refined||out.deduped>out.refined||out.shown>out.deduped)throw new Error("匹配漏斗计数不守恒");
+  return out;
+}
+function stableHash(s){let h=2166136261>>>0;for(let i=0;i<s.length;i++){h^=s.charCodeAt(i);h=Math.imul(h,16777619)}return h>>>0}
+function seededRandom(seed){let x=seed>>>0||1;return()=>{x^=x<<13;x^=x>>>17;x^=x<<5;return(x>>>0)/4294967296}}
+function samplePlaceboStarts(key,starts,limit=8,seed=20260703){
+  const a=[...starts],rnd=seededRandom(stableHash(key+":"+seed));for(let i=a.length-1;i>0;i--){const j=Math.floor(rnd()*(i+1));[a[i],a[j]]=[a[j],a[i]]}return a.slice(0,limit);
+}
+function rankPlacebos(target,pool){
+  return pool.filter(p=>p.key!==target.key).map(p=>({p,rank:[p.board===target.board?0:1,Math.abs(dateOrdinal(p.endD)-dateOrdinal(target.endD)),Math.abs(Math.log((p.sd||1e-9)/(target.sd||1e-9))),p.key,p.endD]})).sort((a,b)=>{for(let i=0;i<a.rank.length;i++){if(a.rank[i]<b.rank[i])return-1;if(a.rank[i]>b.rank[i])return 1}return 0}).map(x=>x.p);
+}
+function placeboSummary(matches,pool,horizon,rounds=200,seed=20260703){
+  const matchVals=matches.map(m=>m.excess?.[horizon]).filter(Number.isFinite),matchMedian=medianOf(matchVals),matchWin=matchVals.length?matchVals.filter(x=>x>0).length/matchVals.length:null,rnd=seededRandom(seed),roundStats=[];
+  for(let r=0;r<rounds;r++){
+    const used=new Set(),vals=[];
+    for(const m of matches){const ranked=rankPlacebos(m,pool).filter(p=>Number.isFinite(p.excess?.[horizon])&&!used.has(p.id));if(!ranked.length)continue;const band=ranked.slice(0,Math.min(5,ranked.length)),p=band[Math.floor(rnd()*band.length)];used.add(p.id);vals.push(p.excess[horizon])}
+    if(vals.length)roundStats.push({n:vals.length,win:vals.filter(x=>x>0).length/vals.length,median:medianOf(vals)});
+  }
+  return {rounds:roundStats.length,pairedN:roundStats.length?Math.round(roundStats.reduce((n,x)=>n+x.n,0)/roundStats.length):0,matchWin,matchMedian,placeboWin:roundStats.length?roundStats.reduce((n,x)=>n+x.win,0)/roundStats.length:null,placeboMedian:roundStats.length?medianOf(roundStats.map(x=>x.median)):null,betterRate:roundStats.length&&matchMedian!==null?roundStats.filter(x=>matchMedian>x.median).length/roundStats.length:null};
+}
 
 
 function idbOpen(){
   return new Promise((res,rej)=>{
-    const rq=indexedDB.open("kline_tool_v2",1);
-    rq.onupgradeneeded=()=>rq.result.createObjectStore("stocks",{keyPath:"key"});
+    const rq=indexedDB.open("kline_tool_v2",2);
+    rq.onupgradeneeded=()=>{if(!rq.result.objectStoreNames.contains("stocks"))rq.result.createObjectStore("stocks",{keyPath:"key"});if(!rq.result.objectStoreNames.contains("meta"))rq.result.createObjectStore("meta",{keyPath:"key"})};
     rq.onsuccess=()=>res(rq.result);
     rq.onerror=()=>rej(rq.error);
   });
@@ -440,6 +555,21 @@ function idbPutBatch(db,recs){
     }catch(_){res(false)}
   });
 }
+function idbAll(db){return new Promise(res=>{try{const rq=db.transaction("stocks","readonly").objectStore("stocks").getAll();rq.onsuccess=()=>res(rq.result||[]);rq.onerror=()=>res([])}catch(_){res([])}})}
+function idbDeleteBatch(db,keys){return new Promise(res=>{try{const tx=db.transaction("stocks","readwrite"),st=tx.objectStore("stocks");for(const k of keys)st.delete(k);tx.oncomplete=()=>res(true);tx.onerror=tx.onabort=()=>res(false)}catch(_){res(false)}})}
+async function maintainCache(db){
+  if(!db)return {removed:0,count:0,quotaKnown:false};
+  const records=await idbAll(db),now=Date.now();
+  for(const r of records){if(CACHE_TOUCHES.has(r.key))r.lastAccess=now;r.bytes=r.bytes??estimateRecordBytes(r)}
+  CACHE_TOUCHES.clear();
+  let quota=null;
+  try{const est=typeof navigator!=="undefined"&&navigator.storage?.estimate?await navigator.storage.estimate():null;quota=Number.isFinite(est?.quota)?est.quota:null}catch(_){}
+  const maxBytes=quota===null?Infinity:quota * .2;
+  const keys=selectCacheEvictions(records,{ver:ALGO_VER,maxCount:7000,maxBytes,targetRatio:.9});
+  if(keys.length)await idbDeleteBatch(db,keys);
+  const survivors=records.filter(r=>!keys.includes(r.key));if(survivors.length)await idbPutBatch(db,survivors);
+  return {removed:keys.length,count:survivors.length,quotaKnown:quota!==null,maxBytes:Number.isFinite(maxBytes)?maxBytes:null};
+}
 
 async function getStock(key,pending){
   const f0=FILES.get(key);
@@ -447,11 +577,12 @@ async function getStock(key,pending){
   const file=f0.getFile?await f0.getFile():f0;
   const hit=DB?await idbGet(DB,key):null;
   if(isCacheValid(hit,file,RIGHTS_STAMP,ALGO_VER)){
+    CACHE_TOUCHES.add(key);
     return {dates:new Int32Array(hit.dates),closes:new Float64Array(hit.closes),vols:new Float64Array(hit.vols),warn:hit.warn,qStatus:hit.qStatus,qEvents:hit.qEvents,lastD:hit.lastD};
   }
   const buf=await file.arrayBuffer();
   const p=parseDayQfq(buf,key);
-  pending.push({key,ver:ALGO_VER,rv:RIGHTS_STAMP,size:file.size,mtime:file.lastModified,dates:p.dates.buffer,closes:p.closes.buffer,vols:p.vols.buffer,warn:p.warn,qStatus:p.qStatus,qEvents:p.qEvents,lastD:p.lastD});
+  const rec={key,ver:ALGO_VER,rv:RIGHTS_STAMP,size:file.size,mtime:file.lastModified,dates:p.dates.buffer,closes:p.closes.buffer,vols:p.vols.buffer,warn:p.warn,qStatus:p.qStatus,qEvents:p.qEvents,lastD:p.lastD,lastAccess:Date.now()};rec.bytes=estimateRecordBytes(rec);pending.push(rec);
   return p;
 }
 
@@ -473,18 +604,24 @@ function subScores(stk,s,e,R,zzth){
   const volS=Math.max(0,cosine(zscore(lv),R.zvol));
   const ws=windowStats(stk.closes,s,e);
   const vdd=Math.max(0,1-Math.min(1,Math.abs(ws.sd-R.stats.sd)/(R.stats.sd+1e-9)*0.7+Math.abs(ws.mdd-R.stats.mdd)*1.8));
-  return {cum,ret,zig,ma:maS,vol:volS,vdd};
+  return {cum,ret,zig,ma:maS,vol:volS,vdd,amp:amplitudeSimilarity(ws,R.stats)};
 }
 
 self.onmessage=async ev=>{
   const msg=ev.data;
   if(msg.type==="files"){
-    FILES=new Map(msg.entries);RIGHTS_STAMP=msg.rightsStamp||"raw";let decodeError=null;
-    try{RIGHTS=msg.gbbq?decodeGbbq(msg.gbbq,msg.keyB64):null}
+    FILES=new Map(msg.entries);BENCHMARK_FILES=new Map(msg.benchmarks||[]);BENCHMARKS=new Map();
+    for(const [key,f0] of BENCHMARK_FILES){
+      try{const f=f0.getFile?await f0.getFile():f0,p=parseDayBuffer(await f.arrayBuffer());if(p.dates.length)BENCHMARKS.set(key,p)}catch(_){}
+    }
+    RIGHTS_STAMP=msg.rightsStamp||"raw";let decodeError=null,diagnostics=null,continuity={status:"unchecked",reason:"未提供权息文件",samples:0};
+    try{
+      if(msg.gbbq){const decoded=decodeGbbq(msg.gbbq,msg.keyB64);RIGHTS=decoded.rights;diagnostics=decoded.diagnostics;const structural=validateRightsDiagnostics(diagnostics);if(structural.status!=="valid")throw new Error(structural.reason);continuity=await checkRightsContinuity(RIGHTS);if(continuity.status==="error")throw new Error(continuity.reason)}else RIGHTS=null;
+    }
     catch(err){RIGHTS=new Map();decodeError=err}
     RIGHTS_STATE=resolveRightsState(RIGHTS,decodeError);
     if(RIGHTS_STATE.status!=="valid")RIGHTS_STAMP="raw:"+RIGHTS_STATE.reason;
-    postMessage({type:"rightsStatus",ok:RIGHTS_STATE.status==="valid",status:RIGHTS_STATE.status,reason:RIGHTS_STATE.reason,stocks:RIGHTS?RIGHTS.size:0});return
+    postMessage({type:"rightsStatus",ok:RIGHTS_STATE.status==="valid",status:RIGHTS_STATE.status,reason:RIGHTS_STATE.reason,stocks:RIGHTS?RIGHTS.size:0,diagnostics,continuityStatus:continuity.status,continuityReason:continuity.reason,continuitySamples:continuity.samples});return
   }
   if(msg.type==="series"){
     try{
@@ -511,6 +648,9 @@ async function runMatch(cfg){
 
   const refKey=cfg.refKey;
   const timeframe=normalizeTimeframe(cfg.timeframe);
+  const benchmarkAgg=new Map();
+  for(const [key,daily] of BENCHMARKS)benchmarkAgg.set(key,aggregateSeries({...daily,lastD:daily.dates[daily.dates.length-1]},timeframe));
+  const benchmarkFor=key=>benchmarkAgg.get(benchmarkKeyFor(key))||null;
   const refDaily=await getStock(refKey,pending);
   if(!refDaily){post({type:"error",msg:"未找到参考股票数据"});return}
   const refStk=aggregateSeries(refDaily,timeframe,cfg.d2);
@@ -546,13 +686,7 @@ async function runMatch(cfg){
   const srcKeys=[...FILES.keys()];
   const keys=[];
   for(const k of srcKeys){
-    const mkt=k.slice(0,2),c=k.slice(2);
-    let board=null;
-    if(mkt==="bj")board="bj";
-    else if(c.startsWith("68"))board="kcb";
-    else if(c.startsWith("30"))board="cyb";
-    else if(mkt==="sh"&&/^(60)/.test(c)||mkt==="sz"&&/^(00)/.test(c))board="main";
-    else if(mkt==="sh"&&/^(51|56|58)/.test(c)||mkt==="sz"&&/^(15|16)/.test(c))board="etf";
+    const board=boardOfKey(k);
     if(!board)continue;
     if(!cfg.boards[board])continue;
     if(cfg.exST&&stSet.has(k))continue;
@@ -566,6 +700,9 @@ async function runMatch(cfg){
   const K_DTW=Math.min(K_COARSE,Math.max(20,Math.floor(cfg.dtwLimit)||200));
   const dtwBand=Math.min(24,Math.max(1,Math.floor(cfg.dtwBand)||6));
   const coarse=[];
+  const funnel={stocks:keys.length,windows:0,coarsePassed:0,globalKept:0,refined:0,dtw:0,deduped:0,shown:0};
+  const placeboPool=[];
+  const addPlacebos=(key,stk,starts)=>{for(const s of samplePlaceboStarts(key,starts,8)){const e=s+L-1;if(e>=stk.dates.length)continue;const packed=packStk(stk,s,e,benchmarkFor(key)),stats=windowStats(stk.closes,s,e);placeboPool.push({id:`${key}:${s}`,key,board:boardOfKey(key),startD:packed.startD,endD:packed.endD,sd:stats.sd,fut:packed.fut,benchmark:packed.benchmark,excess:packed.excess,lagBars:packed.lagBars})}};
   const scratch=new Float64Array(32);
   const mode=cfg.mode;
   const freshnessBars=timeframe==="month"?2:timeframe==="week"?6:30;
@@ -601,6 +738,7 @@ async function runMatch(cfg){
 
       if(mode==="peer"){
         if(key===refKey)continue;
+        funnel.windows++;
         const refWin={dates:refStk.dates.subarray(rs,re+1),periods:refStk.periods?refStk.periods.subarray(rs,re+1):undefined,closes:refStk.closes.subarray(rs,re+1),vols:refStk.vols.subarray(rs,re+1)};
         const peerSlice=sliceSeriesByDate(stk,refStartD,refEndD);
         const al=alignCommonDates(refWin,peerSlice);
@@ -614,15 +752,16 @@ async function runMatch(cfg){
         const ret=Math.max(0,cosine(zscore(ra),zscore(rb)));
         if(0.5*cum+0.5*ret<0.3){skip("同期粗筛未通过",key);continue}
         const s=al.bIndices[0],e=al.bIndices[al.bIndices.length-1];
+        addPlacebos(key,stk,[s]);
         const peerStk={closes:al.bCloses,vols:al.bVols};peerStk.ma20=ma20Arr(peerStk.closes);
         const peerRef={zcum:zscore(al.aCloses.map(x=>Math.log(x))),zret:zscore(retSlice(al.aCloses,0,al.aCloses.length-1)),
           amps:zigAmps(al.aCloses,cfg.zzth),stats:windowStats(al.aCloses,0,al.aCloses.length-1)};
         const refMa=ma20Arr(al.aCloses),rma=new Float64Array(al.aCloses.length),rvol=new Float64Array(al.aCloses.length);
         for(let q=0;q<al.aCloses.length;q++){rma[q]=Number.isNaN(refMa[q])?0:(al.aCloses[q]-refMa[q])/refMa[q];rvol[q]=Math.log(1+al.aVols[q])}
         peerRef.zma=zscore(rma);peerRef.zvol=zscore(rvol);
-        const sub=subScores(peerStk,0,peerStk.closes.length-1,peerRef,cfg.zzth);
+        funnel.coarsePassed++;const sub=subScores(peerStk,0,peerStk.closes.length-1,peerRef,cfg.zzth);
         sub.cum=cum;sub.ret=ret;
-        coarse.push({key,s,e,sub,warn:stk.warn,stk:packStk(stk,s,e),coarse:0.5*cum+0.5*ret});
+        coarse.push({key,s,e,sub,warn:stk.warn,stk:packStk(stk,s,e,benchmarkFor(key)),coarse:0.5*cum+0.5*ret});
       }else{
         const minLen=mode==="recent"?L:L+5;
         if(n<minLen){skip("窗口数据不足",key);continue}
@@ -633,6 +772,7 @@ async function runMatch(cfg){
           let maxE=n-1;if(cfg.isolate)maxE=historicalMaxEnd(stk.dates,refStartD);
           starts=[];for(let s=0;s+L-1<=maxE;s+=cfg.step)starts.push(s);
         }
+        addPlacebos(key,stk,starts);
         const lsAll=new Float64Array(n);
         for(let i=0;i<n;i++)lsAll[i]=Math.log(Math.max(stk.closes[i],1e-9));
         let bestOfStock=[];
@@ -644,6 +784,7 @@ async function runMatch(cfg){
             if(mode==="recent"&&overlapRatio({s,e},{s:rs,e:re},L)>0.7)continue;
             if(mode!=="recent"&&!(e<rs||s>re))continue;
           }
+          funnel.windows++;
           for(let q=0;q<32;q++){
             const t=q*(L-1)/31,j=Math.floor(t),f=t-j;
             const a=lsAll[s+j],b=s+j+1<=e?lsAll[s+j+1]:a;
@@ -655,7 +796,7 @@ async function runMatch(cfg){
           let dot=0;
           for(let q=0;q<32;q++)dot+=((scratch[q]-m)/sd)*R.z32[q];
           const cs=dot/32;
-          if(cs>coarseThresholdEffective)bestOfStock.push([cs,s]);
+          if(cs>coarseThresholdEffective){funnel.coarsePassed++;bestOfStock.push([cs,s])}
         }
         if(!bestOfStock.length){skip("形态粗筛未通过",key);continue}
         bestOfStock.sort((a,b)=>b[0]-a[0]);
@@ -669,6 +810,7 @@ async function runMatch(cfg){
   }
   if(pending.length&&DB)await idbPutBatch(DB,pending.splice(0));
   const diversified=mergePerStockCandidates(coarse,10,K_COARSE);
+  funnel.globalKept=diversified.length;
   coarse.length=0;coarse.push(...diversified);
 
   post({type:"progress",done:total,total,phase:"精排",rate:"",eta:""});
@@ -685,23 +827,25 @@ async function runMatch(cfg){
         if(daily){stk=aggregateSeries(daily,timeframe);stk.ma20=ma20Arr(stk.closes)}
       }catch(_){}
       for(const c of cands){
-        if(stk&&c.e<stk.dates.length){c.sub=subScores(stk,c.s,c.e,R,cfg.zzth);c.stk=packStk(stk,c.s,c.e)}
+        if(stk&&c.e<stk.dates.length){c.sub=subScores(stk,c.s,c.e,R,cfg.zzth);c.stk=packStk(stk,c.s,c.e,benchmarkFor(key))}
         else c.drop=true;
       }
       if(++rdone%40===0)await new Promise(r=>setTimeout(r));
     }
     if(pending.length&&DB)await idbPutBatch(DB,pending.splice(0));
     const finalists=coarse.filter(c=>!c.drop&&c.sub&&c.stk);
+    funnel.refined=finalists.length;
     coarse.length=0;coarse.push(...finalists);
   }
-  const W=cfg.weights,wsum=W.ret+W.cum+W.zig+W.ma+W.vol+W.vdd||1;
+  const W=cfg.weights,wsum=W.ret+W.cum+W.zig+W.ma+W.vol+W.vdd+(W.amp||0)||1;
   for(const c of coarse){
     const s=c.sub;
-    c.score=(W.ret*s.ret+W.cum*s.cum+W.zig*s.zig+W.ma*s.ma+W.vol*s.vol+W.vdd*s.vdd)/wsum;
+    c.score=(W.ret*s.ret+W.cum*s.cum+W.zig*s.zig+W.ma*s.ma+W.vol*s.vol+W.vdd*s.vdd+(W.amp||0)*s.amp)/wsum;
     if(c.warn)c.score*=0.92;
   }
   coarse.sort((a,b)=>b.score-a.score);
   const dtwTop=coarse.slice(0,K_DTW),wd=Math.min(Math.max(cfg.wDtw,0),50)/100;
+  funnel.dtw=dtwTop.length;
   for(const c of dtwTop){
     const z=zscore(resample(c.stk.win.map(x=>Math.log(x)),48));
     const dist=dtwDist(z,R.z48,dtwBand);
@@ -721,17 +865,23 @@ async function runMatch(cfg){
     }
     if(ov)continue;
     arr.push(c);kept.push(c);
-    if(kept.length>=cfg.topN)break;
   }
+  funnel.deduped=kept.length;
 
   const toRow=c=>{
     const st=c.stk;
-    return {key:c.key,startD:st.startD,endD:st.endD,score:c.score,sub:c.sub,warn:c.warn,
-      fut:st.fut,nn:st.nnSmall,futNn:st.futNn,lastD:st.lastD};
+    return {key:c.key,board:boardOfKey(c.key),startD:st.startD,endD:st.endD,sd:windowStats(st.win,0,st.win.length-1).sd,score:c.score,sub:c.sub,warn:c.warn,
+      fut:st.fut,benchmark:st.benchmark,excess:st.excess,lagBars:st.lagBars,benchmarkKey:benchmarkKeyFor(c.key),nn:st.nnSmall,futNn:st.futNn,lastD:st.lastD};
   };
-  const rows=kept.map(toRow),statRows=dedupeOverlaps(kept,0.7,L).map(toRow),statSummary={};
-  for(const hk of["r5","r10","r20","r60"]){const raw=statRows.map(r=>r.fut[hk]).filter(Number.isFinite),clusters=clusterHorizonValues(statRows,hk,7).sort((a,b)=>a-b);statSummary[hk]={rawN:raw.length,periodN:clusters.length,win:clusters.length?clusters.filter(x=>x>0).length/clusters.length:null,interval:bootstrapWinInterval(clusters),median:clusters.length?clusters[Math.floor(clusters.length/2)]:null}}
-  post({type:"result",rows,statRows,meta:{mode,timeframe,recentBars:effectiveRecentBars,scanned:total,skipped,skipReasons,skipDetails,settings:{preset:cfg.preset||"custom",coarseThreshold,coarseThresholdEffective,K_COARSE,K_DTW,dtwBand},statSummary,L,refStartD,refEndD,elapsed:((Date.now()-t0)/1000).toFixed(1),
+  const rows=kept.slice(0,cfg.topN).map(toRow),statRows=dedupeOverlaps(kept,0.7,L).map(toRow),statSummary={};funnel.shown=rows.length;
+  const placebo={};for(const hk of["r5","r10","r20","r60"])placebo[hk]=placeboSummary(statRows,placeboPool,hk,200,20260703);
+  for(const hk of["r5","r10","r20","r60"]){
+    const maturity=summarizeHorizon(statRows,hk),family=maturity.excessN?"excess":"fut";
+    const clusters=(family==="fut"?clusterHorizonValues(statRows,hk,7):clusterHorizonValues(statRows,hk,7,family)).sort((a,b)=>a-b);
+    statSummary[hk]={...maturity,family,periodN:clusters.length,win:clusters.length?clusters.filter(x=>x>0).length/clusters.length:null,interval:bootstrapWinInterval(clusters),median:medianOf(clusters)};
+  }
+  try{const cache=await maintainCache(DB);post({type:"cacheStatus",...cache})}catch(err){post({type:"cacheStatus",error:String(err)})}
+  post({type:"result",rows,statRows,meta:{mode,timeframe,recentBars:effectiveRecentBars,scanned:total,skipped,skipReasons,skipDetails,funnel:normalizeFunnel(funnel),placebo,settings:{preset:cfg.preset||"custom",coarseThreshold,coarseThresholdEffective,K_COARSE,K_DTW,dtwBand},statSummary,L,refStartD,refEndD,elapsed:((Date.now()-t0)/1000).toFixed(1),
     refWarn:refStk.warn,candidates:coarse.length,refNn:Array.from(resample(refStk.closes.subarray(rs,re+1),120)).map(x=>x/refStk.closes[rs])}});
 }
 
@@ -740,13 +890,19 @@ function lastIdxBefore(dates,d){
   while(lo<=hi){const m=(lo+hi)>>1;if(dates[m]<d){ans=m+1;lo=m+1}else hi=m-1}
   return ans;
 }
-function packStk(stk,s,e){
+function packStk(stk,s,e,benchmarkSeries=null){
   const L=e-s+1,c0=stk.closes[s];
   const win=Array.from(stk.closes.subarray(s,e+1));
   const nnSmall=Array.from(resample(stk.closes.subarray(s,e+1),120)).map(x=>x/c0);
   const n=stk.dates.length;
-  const fut={};
-  for(const h of[5,10,20,60])fut["r"+h]=e+h<n?stk.closes[e+h]/stk.closes[e]-1:null;
+  const fut={},benchmark={},excess={},lagBars={};
+  for(const h of[5,10,20,60]){
+    const hk="r"+h,valid=e+h<n;
+    fut[hk]=valid?stk.closes[e+h]/stk.closes[e]-1:null;
+    benchmark[hk]=valid?benchmarkReturn(benchmarkSeries,stk.dates[e],stk.dates[e+h]):null;
+    excess[hk]=excessReturn(fut[hk],benchmark[hk]);
+    lagBars[hk]=valid?n-1-e:null;
+  }
   let mu=null,md=null;
   if(e+60<n){
     let pk=stk.closes[e];mu=0;md=0;
@@ -760,20 +916,21 @@ function packStk(stk,s,e){
   fut.maxUp=mu;fut.maxDn=md;
   const fe=Math.min(n-1,e+60);
   const futNn=fe>e?Array.from(stk.closes.subarray(e,fe+1)).map(x=>x/c0):[];
-  return {startD:stk.dates[s],endD:stk.dates[e],win,nnSmall,fut,futNn:futNn.length>1?Array.from(resample(new Float64Array(futNn),Math.min(60,futNn.length))):[],lastD:stk.lastD};
+  return {startD:stk.dates[s],endD:stk.dates[e],win,nnSmall,fut,benchmark,excess,lagBars,futNn:futNn.length>1?Array.from(resample(new Float64Array(futNn),Math.min(60,futNn.length))):[],lastD:stk.lastD};
 }
 self.__KLINE_TEST_API__={version:ALGO_VER,parseDayBuffer,resolveRightsState,corporateActionFactor,applyCorporateActions,
-  aggregateSeries,periodKey,zscore,cosine,dtwDist,zigAmps,alignCommonDates,sliceSeriesByDate,dedupeOverlaps,mergePerStockCandidates,historicalMaxEnd,recentWindowStarts,recentFreshnessCutoff,clusterHorizonValues,bootstrapWinInterval,isCacheValid,adaptiveCoarseThreshold};
+  aggregateSeries,periodKey,zscore,cosine,dtwDist,zigAmps,alignCommonDates,sliceSeriesByDate,dedupeOverlaps,mergePerStockCandidates,historicalMaxEnd,recentWindowStarts,recentFreshnessCutoff,clusterHorizonValues,bootstrapWinInterval,isCacheValid,adaptiveCoarseThreshold,boardOfKey,benchmarkKeyFor,indexOnOrBefore,benchmarkReturn,excessReturn,medianOf,summarizeHorizon,ratioSimilarity,amplitudeSimilarity,estimateRecordBytes,selectCacheEvictions,validateRightsDiagnostics,validateContinuity,normalizeFunnel,samplePlaceboStarts,rankPlacebos,placeboSummary};
 </script>
 
 <script>
 "use strict";
 const $=id=>document.getElementById(id);
-const UI_ALGO_VER=9;
-let files=new Map(), names={}, gbbqFile=null, rightsState="raw", ref=null, worker=null, lastRows=null, lastStatRows=null, lastMeta=null, referenceDates=null, sortKey="score", sortAsc=false;
+const UI_ALGO_VER=10;
+let files=new Map(), benchmarkFiles=new Map(), names={}, gbbqFile=null, rightsState="raw", rightsContinuity="unchecked", ref=null, worker=null, lastRows=null, lastStatRows=null, lastMeta=null, referenceDates=null, sortKey="score", sortAsc=false;
 let seriesSeq=0;const seriesWait=new Map();
 
 const A_PREFIX={sh:["600","601","603","605","688","51","56","58"],sz:["000","001","002","003","300","301","15","16"],bj:["43","83","87","92"]};
+const INDEX_KEYS=new Set(["sh000300","sz399006","sh000688","bj899050"]);
 
 function setMsg(phase,text){$("msg").textContent=(phase?`【${phase}】`:"")+text}
 function checkBrowserCapabilities(){
@@ -790,7 +947,7 @@ function cleanupLegacyEastmoneyCache(){
   const marker="kline_em_cache_cleaned_v1";
   try{if(localStorage.getItem(marker)==="1")return}catch(_){}
   try{
-    const rq=indexedDB.open("kline_tool_v2",1);
+    const rq=indexedDB.open("kline_tool_v2");
     rq.onupgradeneeded=()=>{if(!rq.result.objectStoreNames.contains("stocks"))rq.result.createObjectStore("stocks",{keyPath:"key"})};
     rq.onsuccess=()=>{
       const db=rq.result;
@@ -815,7 +972,7 @@ $("btnDir").onclick=async()=>{
     return;
   }
   setMsg("读取","正在扫描目录…（仅本地读取，不会上传）");
-  files=new Map();names={};gbbqFile=null;
+  files=new Map();benchmarkFiles=new Map();names={};gbbqFile=null;
   const getDir=async(h,path)=>{let cur=h;for(const seg of path){try{cur=await cur.getDirectoryHandle(seg)}catch(_){return null}}return cur};
   let vip=await getDir(root,["vipdoc"])||root;
   const tnf=[];
@@ -824,6 +981,7 @@ $("btnDir").onclick=async()=>{
     if(!lday)continue;
     for await(const[nm,h]of lday.entries()){
       const m=nm.match(/^(sh|sz|bj)(\d{6})\.day$/);
+      if(m&&INDEX_KEYS.has(m[1]+m[2])){benchmarkFiles.set(m[1]+m[2],h);continue}
       if(m&&A_PREFIX[m[1]]&&A_PREFIX[m[1]].some(x=>m[2].startsWith(x)))files.set(m[1]+m[2],h);
     }
   }
@@ -836,12 +994,13 @@ $("btnDir").onclick=async()=>{
 };
 
 $("dir").addEventListener("change",async e=>{
-  files=new Map();names={};gbbqFile=null;
+  files=new Map();benchmarkFiles=new Map();names={};gbbqFile=null;
   const tnf=[];
   for(const f of e.target.files){
     const p=(f.webkitRelativePath||f.name).replace(/\\/g,"/");
     let m=p.match(/(sh|sz|bj)\/lday\/(sh|sz|bj)(\d{6})\.day$/);
     if(m){
+      if(INDEX_KEYS.has(m[2]+m[3])){benchmarkFiles.set(m[2]+m[3],f);continue}
       if(A_PREFIX[m[2]]&&A_PREFIX[m[2]].some(x=>m[3].startsWith(x)))files.set(m[2]+m[3],f);
       continue;
     }
@@ -899,7 +1058,7 @@ async function initWorker(){
   if(gbbqFile){
     try{gbbq=await gbbqFile.arrayBuffer();rightsStamp=`${gbbqFile.size}:${gbbqFile.lastModified}`}catch(_){}
   }
-  worker.postMessage({type:"files",entries:[...files.entries()],gbbq,keyB64:$("gbbqKey").textContent.trim(),rightsStamp});
+  worker.postMessage({type:"files",entries:[...files.entries()],benchmarks:[...benchmarkFiles.entries()],gbbq,keyB64:$("gbbqKey").textContent.trim(),rightsStamp});
 }
 
 function getAdjustedSeries(key,timeframe="day",endD=null){
@@ -917,7 +1076,7 @@ function lastIndexOnOrBefore(dates,target){
 }
 
 const PREF_KEY="kline_prefs_v1";
-const PREF_IDS=["timeframe","zz","step","recentBars","perStock","topN","isolate","fMain","fCyb","fKcb","fBj","fEtf","fSt","fNew","wRet","wCum","wZig","wMa","wVol","wVdd","wDtw","matchPreset","coarseTh","coarseLimit","dtwLimit","dtwBand"];
+const PREF_IDS=["timeframe","zz","step","recentBars","perStock","topN","isolate","fMain","fCyb","fKcb","fBj","fEtf","fSt","fNew","wRet","wCum","wZig","wMa","wVol","wVdd","wAmp","wDtw","matchPreset","coarseTh","coarseLimit","dtwLimit","dtwBand"];
 function savePrefs(){
   try{
     const o={};
@@ -1159,7 +1318,7 @@ $("btnM").onclick=()=>{
     perStock:parseInt($("perStock").value),topN:parseInt($("topN").value),
     boards:{main:$("fMain").checked,cyb:$("fCyb").checked,kcb:$("fKcb").checked,bj:$("fBj").checked,etf:$("fEtf").checked},
     exST:$("fSt").checked,stKeys,exNew:$("fNew").checked,
-    weights:{ret:+$("wRet").value||0,cum:+$("wCum").value||0,zig:+$("wZig").value||0,ma:+$("wMa").value||0,vol:+$("wVol").value||0,vdd:+$("wVdd").value||0},
+    weights:{ret:+$("wRet").value||0,cum:+$("wCum").value||0,zig:+$("wZig").value||0,ma:+$("wMa").value||0,vol:+$("wVol").value||0,vdd:+$("wVdd").value||0,amp:+$("wAmp").value||0},
     wDtw:+$("wDtw").value||0
   };
   $("btnM").disabled=true;$("btnC").style.display="";
@@ -1179,7 +1338,10 @@ function onWorkerMsg(ev){
   const m=ev.data;
   if(m.type==="rightsStatus"){
     rightsState=m.status||"error";
+    rightsContinuity=m.continuityStatus||"unchecked";
     setMsg("复权",m.ok?`真实权息数据已解密，覆盖 ${m.stocks} 只证券；后续分析与匹配均使用前复权。`:`权息状态：${m.reason||"读取失败"}；将明确使用原始价格。`);
+  }else if(m.type==="cacheStatus"){
+    if(m.error)setMsg("缓存","缓存维护未完成，不影响本次结果："+m.error);
   }else if(m.type==="series"){
     const done=seriesWait.get(m.reqId);if(done){seriesWait.delete(m.reqId);done(m)}
   }else if(m.type==="progress"){
@@ -1200,6 +1362,7 @@ function renderResults(){
   const rows=lastRows,meta=lastMeta;
   const statRows=lastStatRows||rows;
   $("matchPanel").style.display="block";
+  const f=meta.funnel||{};$("funnel").textContent=`证券 ${f.stocks??0} → 窗口 ${(f.windows??0).toLocaleString()} → 粗筛 ${(f.coarsePassed??0).toLocaleString()} → 全局 ${f.globalKept??0} → 精排 ${f.refined??0}（其中DTW重排 ${f.dtw??0}）→ 去重 ${f.deduped??0} → 展示 ${f.shown??0}`;
   const modeTxt=meta.mode==="hist"?"历史滑窗搜索":meta.mode==="recent"?"近期相似区间":"同期联动";
   const timeframe=meta.timeframe||"day",unit=TF_UNIT[timeframe];
   $("matchTitle").textContent=`匹配结果 · ${TF_LABEL[timeframe]} · ${modeTxt} · 窗口${meta.L}个${unit}线周期${meta.mode==="recent"?` · 近期范围${meta.recentBars}个周期`:""} · 扫描${meta.scanned}只 · 跳过${meta.skipped||0}只 · 耗时${meta.elapsed}秒`+(meta.refWarn?" · ⚠未复权":" · 真实权息前复权");
@@ -1217,18 +1380,21 @@ function renderResults(){
     const v=document.createElement("div");v.className="v";v.style.fontSize="15px";
     if(summary&&summary.periodN){
       const[lo,hi]=summary.interval;
-      k.textContent=`${label}（展示n=${rows.length}，有效n=${summary.rawN}，独立时段n=${summary.periodN}）`;
-      v.textContent=`簇级胜率${(summary.win*100).toFixed(0)}% Bootstrap 95%区间${(lo*100).toFixed(0)}–${(hi*100).toFixed(0)}% 中位${pct(summary.median)}`;
+      k.textContent=`${label}（有效n=${summary.rawN}/${summary.totalN}，完整率${(summary.completeRate*100).toFixed(0)}%，独立时段n=${summary.periodN}）`;
+      const kind=summary.family==="excess"?"超额":"绝对";
+      v.textContent=`${kind}簇级胜率${(summary.win*100).toFixed(0)}% · Bootstrap 95%区间${(lo*100).toFixed(0)}–${(hi*100).toFixed(0)}% · 中位${pct(summary.median)} · 中位滞后${summary.medianLagBars??"—"}${unit}`;
       v.className="v "+(summary.median>=0?"up":"dn");
     }else{k.textContent=label;v.textContent="样本不足"}
     div.append(k,v);bt.appendChild(div);
   }
+  {const p=meta.placebo?.r20,div=document.createElement("div");div.className="stat";const k=document.createElement("div");k.className="k";k.textContent="随机基线（200轮）";const v=document.createElement("div");v.className="v";v.style.fontSize="15px";v.textContent=p&&p.rounds?`20${unit}：匹配中位${pct(p.matchMedian)}，随机中位${pct(p.placeboMedian)}；优于随机${(p.betterRate*100).toFixed(0)}%轮（配对${p.pairedN}）`:"可配对样本不足";div.append(k,v);bt.appendChild(div)}
   const topSkips=Object.entries(meta.skipReasons||{}).sort((a,b)=>b[1]-a[1]).slice(0,3).map(([k,n])=>`${k}${n}只`).join("、");
-  $("btNote").textContent="注意：统计先做同股重叠去重，再按相近结束日期聚类并计算Bootstrap区间；仍存在数据挖掘及幸存者偏差。"+(topSkips?`主要淘汰：${topSkips}。`:"")+(meta.mode==="hist"?"已"+(rows.some(r=>r.endD>=meta.refStartD)?"关闭":"启用")+"防前视隔离。":meta.mode==="recent"?"近期模式用于寻找当前或近期形态，不等价于历史回测；最新窗口通常没有完整未来收益。":"同期模式下\"未来收益\"为目标区间结束后的实际走势。");
+  const passRate=f.windows?f.coarsePassed/f.windows:0,thresholdHint=passRate<.001?"粗筛通过率很低，可考虑降低门槛。":passRate>.20?"粗筛通过率很高，可考虑提高门槛。":"";
+  $("btNote").textContent="注意：有本地指数时默认显示超额簇级胜率；统计先做同股重叠去重，再按相近结束日期聚类并计算Bootstrap区间。"+thresholdHint+(topSkips?`主要淘汰：${topSkips}。`:"")+(meta.mode==="hist"?"已"+(rows.some(r=>r.endD>=meta.refStartD)?"关闭":"启用")+"防前视隔离。":meta.mode==="recent"?"近期模式用于寻找当前或近期形态，不等价于历史回测；最新窗口通常没有完整未来收益。":"同期模式下\"未来收益\"为目标区间结束后的实际走势。");
 
   const thead=$("matchTable").querySelector("thead");thead.textContent="";
   const cols=[["idx","#",false],["key","代码",true],["name","名称",false],["range","匹配区间",true],["nn","走势",false],
-    ["score","综合分",true],["cum","累计走势",true],["ret","收益序列",true],["zig","拐点",true],["ma","均线",true],["vol","量能",true],["dtw","DTW",true],
+    ["score","综合分",true],["cum","累计走势",true],["ret","收益序列",true],["zig","拐点",true],["ma","均线",true],["vol","量能",true],["amp","幅度",true],["dtw","DTW",true],
     ["r5",`+5${unit}`,true],["r10",`+10${unit}`,true],["r20",`+20${unit}`,true],["r60",`+60${unit}`,true],["maxUp",`60${unit}最大涨`,true],["maxDn",`60${unit}最大回撤`,true]];
   const trh=document.createElement("tr");
   for(const[k2,label,sortable]of cols){
@@ -1241,7 +1407,7 @@ function renderResults(){
   const get=r=>{
     if(sortKey==="key")return r.key;
     if(sortKey==="range")return r.startD;
-    if(["cum","ret","zig","ma","vol","dtw"].includes(sortKey))return r.sub[sortKey]??-1;
+    if(["cum","ret","zig","ma","vol","amp","dtw"].includes(sortKey))return r.sub[sortKey]??-1;
     if(["r5","r10","r20","r60","maxUp","maxDn"].includes(sortKey))return r.fut[sortKey]??-999;
     return r[sortKey];
   };
@@ -1254,7 +1420,7 @@ function renderResults(){
   sorted.forEach((r,i)=>{
     const tr=document.createElement("tr");tr.className="row";
     const cells=[String(i+1),r.key.slice(2)+(r.warn?" ⚠":""),names[r.key]||"—",fmtD(r.startD)+"~"+fmtD(r.endD),null,
-      r.score.toFixed(3),(r.sub.cum*100).toFixed(0)+"%",(r.sub.ret*100).toFixed(0)+"%",(r.sub.zig*100).toFixed(0)+"%",(r.sub.ma*100).toFixed(0)+"%",(r.sub.vol*100).toFixed(0)+"%",
+      r.score.toFixed(3),(r.sub.cum*100).toFixed(0)+"%",(r.sub.ret*100).toFixed(0)+"%",(r.sub.zig*100).toFixed(0)+"%",(r.sub.ma*100).toFixed(0)+"%",(r.sub.vol*100).toFixed(0)+"%",(r.sub.amp*100).toFixed(0)+"%",
       r.sub.dtw!==undefined?(r.sub.dtw*100).toFixed(0)+"%":"—",
       pct(r.fut.r5),pct(r.fut.r10),pct(r.fut.r20),pct(r.fut.r60),pct(r.fut.maxUp),pct(r.fut.maxDn)];
     cells.forEach((c,ci)=>{
@@ -1269,8 +1435,8 @@ function renderResults(){
         g.stroke();
       }else{
         td.textContent=c;
-        if(ci>=12&&ci<=16){const v2=[r.fut.r5,r.fut.r10,r.fut.r20,r.fut.r60,r.fut.maxUp][ci-12];if(v2!==null&&v2!==undefined)td.className=v2>=0?"up":"dn"}
-        if(ci===17)td.className="dn";
+        if(ci>=13&&ci<=17){const v2=[r.fut.r5,r.fut.r10,r.fut.r20,r.fut.r60,r.fut.maxUp][ci-13];if(v2!==null&&v2!==undefined)td.className=v2>=0?"up":"dn"}
+        if(ci===18)td.className="dn";
       }
       tr.appendChild(td);
     });
@@ -1335,14 +1501,16 @@ $("btnCsv").onclick=()=>{
   if(!lastRows)return;
   const rowKey=r=>`${r.key}|${r.startD}|${r.endD}`;
   const statSampleKeys=new Set((lastStatRows||[]).map(rowKey));
-  const head=["代码","名称","开始","结束","模式","周期","近期范围","综合分","累计走势","收益序列","拐点","均线","量能","DTW","复权存疑","权息状态","统计样本","算法版本","粗筛阈值","粗筛候选","DTW候选","DTW带宽","跳过原因","r5","r10","r20","r60","max60涨","max60撤"];
+  const head=["代码","名称","开始","结束","模式","周期","近期范围","综合分","累计走势","收益序列","拐点","均线","量能","幅度相似","DTW","复权存疑","权息状态","权息连续性","统计样本","算法版本","粗筛阈值","粗筛候选","DTW候选","DTW带宽","跳过原因","漏斗证券","漏斗窗口","漏斗粗筛","漏斗全局","漏斗精排","漏斗DTW","漏斗去重","漏斗展示","基准代码","绝对收益r5","绝对收益r10","绝对收益r20","绝对收益r60","基准收益r5","基准收益r10","基准收益r20","基准收益r60","超额收益r5","超额收益r10","超额收益r20","超额收益r60","max60涨","max60撤"];
   const lines=[head.join(",")];
   lastRows.forEach(r=>{
     lines.push([r.key.slice(2),(names[r.key]||"").replace(/,/g,""),r.startD,r.endD,lastMeta.mode,lastMeta.timeframe||"day",lastMeta.recentBars??"",r.score.toFixed(4),
-      r.sub.cum.toFixed(3),r.sub.ret.toFixed(3),r.sub.zig.toFixed(3),r.sub.ma.toFixed(3),r.sub.vol.toFixed(3),
-      r.sub.dtw!==undefined?r.sub.dtw.toFixed(3):"",r.warn?1:0,rightsState,statSampleKeys.has(rowKey(r))?1:0,UI_ALGO_VER,
+      r.sub.cum.toFixed(3),r.sub.ret.toFixed(3),r.sub.zig.toFixed(3),r.sub.ma.toFixed(3),r.sub.vol.toFixed(3),r.sub.amp.toFixed(3),
+      r.sub.dtw!==undefined?r.sub.dtw.toFixed(3):"",r.warn?1:0,rightsState,rightsContinuity,statSampleKeys.has(rowKey(r))?1:0,UI_ALGO_VER,
       lastMeta.settings.coarseThreshold,lastMeta.settings.K_COARSE,lastMeta.settings.K_DTW,lastMeta.settings.dtwBand,Object.entries(lastMeta.skipReasons||{}).map(([k,n])=>k+":"+n).join(";"),
-      ...[r.fut.r5,r.fut.r10,r.fut.r20,r.fut.r60,r.fut.maxUp,r.fut.maxDn].map(x=>x===null||x===undefined?"":(x*100).toFixed(2))
+      ...["stocks","windows","coarsePassed","globalKept","refined","dtw","deduped","shown"].map(k=>lastMeta.funnel?.[k]??""),
+      r.benchmarkKey||"",
+      ...[r.fut.r5,r.fut.r10,r.fut.r20,r.fut.r60,r.benchmark.r5,r.benchmark.r10,r.benchmark.r20,r.benchmark.r60,r.excess.r5,r.excess.r10,r.excess.r20,r.excess.r60,r.fut.maxUp,r.fut.maxDn].map(x=>x===null||x===undefined?"":(x*100).toFixed(2))
     ].join(","));
   });
   const blob=new Blob(["﻿"+lines.join("\r\n")],{type:"text/csv"});

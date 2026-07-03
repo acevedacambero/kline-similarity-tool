@@ -1,6 +1,45 @@
 "use strict";
-const ALGO_VER=9;
-let FILES=null, RIGHTS=new Map(), RIGHTS_STATE={status:"raw",reason:"missing",count:0}, RIGHTS_STAMP="raw", cancelled=false, DB=null;
+const ALGO_VER=10;
+let FILES=null, BENCHMARK_FILES=new Map(), BENCHMARKS=new Map(), RIGHTS=new Map(), RIGHTS_STATE={status:"raw",reason:"missing",count:0}, RIGHTS_STAMP="raw", cancelled=false, DB=null, CACHE_TOUCHES=new Set();
+
+function boardOfKey(key){
+  const mkt=key.slice(0,2),c=key.slice(2);
+  if(mkt==="bj")return "bj";
+  if(c.startsWith("68"))return "kcb";
+  if(c.startsWith("30"))return "cyb";
+  if((mkt==="sh"&&/^(51|56|58)/.test(c))||(mkt==="sz"&&/^(15|16)/.test(c)))return "etf";
+  if((mkt==="sh"&&c.startsWith("60"))||(mkt==="sz"&&c.startsWith("00")))return "main";
+  return null;
+}
+function benchmarkKeyFor(key){
+  return {main:"sh000300",cyb:"sz399006",kcb:"sh000688",bj:"bj899050",etf:"sh000300"}[boardOfKey(key)]||null;
+}
+function indexOnOrBefore(dates,d){
+  let lo=0,hi=dates.length-1,ans=-1;
+  while(lo<=hi){const m=(lo+hi)>>1;if(dates[m]<=d){ans=m;lo=m+1}else hi=m-1}
+  return ans;
+}
+function benchmarkReturn(series,startD,endD){
+  if(!series||!series.dates||!series.closes)return null;
+  const s=indexOnOrBefore(series.dates,startD),e=indexOnOrBefore(series.dates,endD);
+  if(s<0||e<=s||!Number.isFinite(series.closes[s])||!Number.isFinite(series.closes[e])||series.closes[s]<=0)return null;
+  return series.closes[e]/series.closes[s]-1;
+}
+function excessReturn(stockReturn,indexReturn){
+  return Number.isFinite(stockReturn)&&Number.isFinite(indexReturn)?(1+stockReturn)/(1+indexReturn)-1:null;
+}
+function medianOf(values){
+  if(!values.length)return null;
+  const a=[...values].sort((x,y)=>x-y),m=a.length>>1;
+  return a.length%2?a[m]:(a[m-1]+a[m])/2;
+}
+function summarizeHorizon(rows,horizon){
+  const valid=rows.filter(r=>Number.isFinite(r.fut?.[horizon]));
+  const excess=rows.filter(r=>Number.isFinite(r.excess?.[horizon]));
+  const lags=valid.map(r=>r.lagBars?.[horizon]).filter(Number.isFinite);
+  return {totalN:rows.length,rawN:valid.length,excessN:excess.length,missingN:rows.length-valid.length,
+    completeRate:rows.length?valid.length/rows.length:0,medianLagBars:medianOf(lags)};
+}
 
 function zscore(a){
   const n=a.length;let m=0;for(let i=0;i<n;i++)m+=a[i];m/=n;
@@ -153,7 +192,7 @@ function decodeGbbq(buf,keyB64){
   const bin=atob(keyB64),kb=new Uint8Array(bin.length);
   for(let i=0;i<bin.length;i++)kb[i]=bin.charCodeAt(i);
   const kd=new DataView(kb.buffer),src=new Uint8Array(buf),dv=new DataView(buf);
-  const count=Math.min(dv.getUint32(0,true),Math.floor((src.length-4)/29)),out=new Map();
+  const count=Math.min(dv.getUint32(0,true),Math.floor((src.length-4)/29)),out=new Map(),diagnostics={candidates:0,invalid:0,validEvents:0,codes:0};
   let off=4;
   for(let r=0;r<count;r++){
     const clear=new Uint8Array(29),cd=new DataView(clear.buffer);
@@ -174,15 +213,36 @@ function decodeGbbq(buf,keyB64){
     clear.set(src.subarray(off,off+5),24);off+=5;
     let code="";for(let i=1;i<8&&clear[i];i++)code+=String.fromCharCode(clear[i]);
     const d=cd.getUint32(8,true),cat=clear[12];
-    if(cat===1&&/^\d{6}$/.test(code)){
+    if(cat===1){
+      diagnostics.candidates++;
       const ev={d,cash:cd.getFloat32(13,true),rightsPrice:cd.getFloat32(17,true),bonus:cd.getFloat32(21,true),rights:cd.getFloat32(25,true)};
-      if([ev.cash,ev.rightsPrice,ev.bonus,ev.rights].every(Number.isFinite)){
+      const valid=/^\d{6}$/.test(code)&&d>=19900101&&d<=29991231&&[ev.cash,ev.rightsPrice,ev.bonus,ev.rights].every(x=>Number.isFinite(x)&&x>=0&&x<=10000);
+      if(valid){
         if(!out.has(code))out.set(code,[]);out.get(code).push(ev);
-      }
+        diagnostics.validEvents++;
+      }else diagnostics.invalid++;
     }
   }
   for(const a of out.values())a.sort((x,y)=>x.d-y.d);
-  return out;
+  diagnostics.codes=out.size;
+  return {rights:out,diagnostics};
+}
+async function checkRightsContinuity(rights,limit=50){
+  const samples=[];
+  for(const [code,events] of rights){
+    const entry=[...FILES.entries()].find(([key])=>key.endsWith(code));if(!entry)continue;
+    try{
+      const f0=entry[1],f=f0.getFile?await f0.getFile():f0,raw=parseDayBuffer(await f.arrayBuffer());
+      const adjusted={dates:raw.dates,closes:Float64Array.from(raw.closes),vols:Float64Array.from(raw.vols)};applyCorporateActions(adjusted,events);
+      for(const ev of events){
+        let i=0;while(i<raw.dates.length&&raw.dates[i]<ev.d)i++;
+        if(i<=0||i>=raw.dates.length)continue;
+        samples.push({raw:Math.abs(Math.log(raw.closes[i]/raw.closes[i-1])),adjusted:Math.abs(Math.log(adjusted.closes[i]/adjusted.closes[i-1]))});
+        if(samples.length>=limit)return validateContinuity(samples);
+      }
+    }catch(_){}
+  }
+  return validateContinuity(samples);
 }
 function ma20Arr(c){
   const n=c.length,out=new Float64Array(n).fill(NaN);
@@ -191,17 +251,32 @@ function ma20Arr(c){
   return out;
 }
 function windowStats(c,s,e){
-  let pk=0,mdd=0;
+  let pk=0,mdd=0,minLog=Infinity,maxLog=-Infinity;
   const rets=[];
   for(let i=s;i<=e;i++){
-    if(c[i]>pk)pk=c[i];
+    if(c[i]>pk)pk=c[i];const lc=Math.log(Math.max(c[i],1e-9));if(lc<minLog)minLog=lc;if(lc>maxLog)maxLog=lc;
     const dd=c[i]/pk-1;if(dd<mdd)mdd=dd;
     if(i>s)rets.push(c[i]/c[i-1]-1);
   }
   let m=0;for(const r of rets)m+=r;m/=rets.length||1;
   let sd=0;for(const r of rets)sd+=(r-m)*(r-m);sd=Math.sqrt(sd/(rets.length||1));
-  return {mdd,sd};
+  return {mdd,sd,range:maxLog-minLog};
 }
+function validateRightsDiagnostics(d){
+  if(!d||d.validEvents<100)return {status:"error",reason:"有效权息记录不足100条"};
+  if(d.codes<30)return {status:"error",reason:"权息记录覆盖证券不足30只"};
+  if(d.candidates>0&&d.invalid/d.candidates>.10)return {status:"error",reason:"权息坏记录比例超过10%"};
+  return {status:"valid",reason:"结构自检通过"};
+}
+function percentile(values,p){if(!values.length)return null;const a=[...values].sort((x,y)=>x-y);return a[Math.min(a.length-1,Math.floor((a.length-1)*p))]}
+function validateContinuity(samples){
+  if(samples.length<5)return {status:"unchecked",reason:"可验证除权事件不足5个",samples:samples.length};
+  const raw=samples.map(x=>x.raw),adjusted=samples.map(x=>x.adjusted),rawMed=medianOf(raw),adjMed=medianOf(adjusted),rawP90=percentile(raw,.9),adjP90=percentile(adjusted,.9);
+  if(adjMed>rawMed+.03||adjP90>rawP90+.10)return {status:"error",reason:"复权后除权日连续性显著恶化",samples:samples.length,rawMed,adjMed,rawP90,adjP90};
+  return {status:"valid",reason:"连续性抽样通过",samples:samples.length,rawMed,adjMed,rawP90,adjP90};
+}
+function ratioSimilarity(a,b){return a>0&&b>0?Math.exp(-Math.abs(Math.log(a/b))):.5}
+function amplitudeSimilarity(a,b){return .7*ratioSimilarity(a.sd,b.sd)+.3*ratioSimilarity(a.range,b.range)}
 function logSlice(c,s,e){
   const out=new Float64Array(e-s+1);
   for(let i=s;i<=e;i++)out[i-s]=Math.log(Math.max(c[i],1e-9));
@@ -248,9 +323,9 @@ function recentFreshnessCutoff(dates,refEndIndex,lookback=30){
   const end=Math.min(dates.length-1,Math.max(0,refEndIndex));
   return dates[Math.max(0,end-Math.max(0,Math.floor(lookback)))]||0;
 }
-function clusterHorizonValues(rows,horizon,maxGapDays=7){
-  const valid=rows.filter(r=>r.fut&&Number.isFinite(r.fut[horizon])).sort((a,b)=>a.endD-b.endD),out=[];let vals=[],anchor=null;
-  for(const r of valid){const day=dateOrdinal(r.endD);if(anchor!==null&&day-anchor>maxGapDays){out.push(vals.reduce((a,b)=>a+b,0)/vals.length);vals=[];anchor=day}else if(anchor===null)anchor=day;vals.push(r.fut[horizon])}
+function clusterHorizonValues(rows,horizon,maxGapDays=7,family="fut"){
+  const valid=rows.filter(r=>r[family]&&Number.isFinite(r[family][horizon])).sort((a,b)=>a.endD-b.endD),out=[];let vals=[],anchor=null;
+  for(const r of valid){const day=dateOrdinal(r.endD);if(anchor!==null&&day-anchor>maxGapDays){out.push(vals.reduce((a,b)=>a+b,0)/vals.length);vals=[];anchor=day}else if(anchor===null)anchor=day;vals.push(r[family][horizon])}
   if(vals.length)out.push(vals.reduce((a,b)=>a+b,0)/vals.length);return out;
 }
 function bootstrapWinInterval(values,iterations=1000,seed=20260703){
@@ -263,12 +338,50 @@ function adaptiveCoarseThreshold(base,L){
   // 短窗口（周线/月线常见）重采样为32点后余弦噪声更大，按窗口长度线性放宽门槛，最多降低0.15。
   return Math.max(0.3,base-Math.min(0.15,Math.max(0,48-L)*0.005));
 }
+function estimateRecordBytes(r){
+  return (r.dates?.byteLength||0)+(r.closes?.byteLength||0)+(r.vols?.byteLength||0)+256;
+}
+function selectCacheEvictions(records,{ver,maxCount,maxBytes=Infinity,targetRatio=.9}){
+  const stale=records.filter(r=>r.ver!==ver).sort((a,b)=>(a.lastAccess||0)-(b.lastAccess||0));
+  const live=records.filter(r=>r.ver===ver).sort((a,b)=>(a.lastAccess||0)-(b.lastAccess||0));
+  const ordered=[...stale,...live],removed=[],gone=new Set();
+  let count=records.length,bytes=records.reduce((n,r)=>n+(r.bytes??estimateRecordBytes(r)),0);
+  const targetCount=Math.max(1,Math.floor(maxCount*targetRatio)),targetBytes=Number.isFinite(maxBytes)?maxBytes*targetRatio:Infinity;
+  for(const r of ordered){
+    const mustRemove=r.ver!==ver||count>targetCount||bytes>targetBytes;
+    if(!mustRemove)break;
+    removed.push(r.key);gone.add(r.key);count--;bytes-=r.bytes??estimateRecordBytes(r);
+  }
+  return removed;
+}
+function normalizeFunnel(f){
+  const keys=["stocks","windows","coarsePassed","globalKept","refined","dtw","deduped","shown"],out={};for(const k of keys)out[k]=Math.max(0,Math.floor(f[k]||0));
+  if(out.coarsePassed>out.windows||out.globalKept>out.coarsePassed||out.refined>out.globalKept||out.dtw>out.refined||out.deduped>out.refined||out.shown>out.deduped)throw new Error("匹配漏斗计数不守恒");
+  return out;
+}
+function stableHash(s){let h=2166136261>>>0;for(let i=0;i<s.length;i++){h^=s.charCodeAt(i);h=Math.imul(h,16777619)}return h>>>0}
+function seededRandom(seed){let x=seed>>>0||1;return()=>{x^=x<<13;x^=x>>>17;x^=x<<5;return(x>>>0)/4294967296}}
+function samplePlaceboStarts(key,starts,limit=8,seed=20260703){
+  const a=[...starts],rnd=seededRandom(stableHash(key+":"+seed));for(let i=a.length-1;i>0;i--){const j=Math.floor(rnd()*(i+1));[a[i],a[j]]=[a[j],a[i]]}return a.slice(0,limit);
+}
+function rankPlacebos(target,pool){
+  return pool.filter(p=>p.key!==target.key).map(p=>({p,rank:[p.board===target.board?0:1,Math.abs(dateOrdinal(p.endD)-dateOrdinal(target.endD)),Math.abs(Math.log((p.sd||1e-9)/(target.sd||1e-9))),p.key,p.endD]})).sort((a,b)=>{for(let i=0;i<a.rank.length;i++){if(a.rank[i]<b.rank[i])return-1;if(a.rank[i]>b.rank[i])return 1}return 0}).map(x=>x.p);
+}
+function placeboSummary(matches,pool,horizon,rounds=200,seed=20260703){
+  const matchVals=matches.map(m=>m.excess?.[horizon]).filter(Number.isFinite),matchMedian=medianOf(matchVals),matchWin=matchVals.length?matchVals.filter(x=>x>0).length/matchVals.length:null,rnd=seededRandom(seed),roundStats=[];
+  for(let r=0;r<rounds;r++){
+    const used=new Set(),vals=[];
+    for(const m of matches){const ranked=rankPlacebos(m,pool).filter(p=>Number.isFinite(p.excess?.[horizon])&&!used.has(p.id));if(!ranked.length)continue;const band=ranked.slice(0,Math.min(5,ranked.length)),p=band[Math.floor(rnd()*band.length)];used.add(p.id);vals.push(p.excess[horizon])}
+    if(vals.length)roundStats.push({n:vals.length,win:vals.filter(x=>x>0).length/vals.length,median:medianOf(vals)});
+  }
+  return {rounds:roundStats.length,pairedN:roundStats.length?Math.round(roundStats.reduce((n,x)=>n+x.n,0)/roundStats.length):0,matchWin,matchMedian,placeboWin:roundStats.length?roundStats.reduce((n,x)=>n+x.win,0)/roundStats.length:null,placeboMedian:roundStats.length?medianOf(roundStats.map(x=>x.median)):null,betterRate:roundStats.length&&matchMedian!==null?roundStats.filter(x=>matchMedian>x.median).length/roundStats.length:null};
+}
 
 
 function idbOpen(){
   return new Promise((res,rej)=>{
-    const rq=indexedDB.open("kline_tool_v2",1);
-    rq.onupgradeneeded=()=>rq.result.createObjectStore("stocks",{keyPath:"key"});
+    const rq=indexedDB.open("kline_tool_v2",2);
+    rq.onupgradeneeded=()=>{if(!rq.result.objectStoreNames.contains("stocks"))rq.result.createObjectStore("stocks",{keyPath:"key"});if(!rq.result.objectStoreNames.contains("meta"))rq.result.createObjectStore("meta",{keyPath:"key"})};
     rq.onsuccess=()=>res(rq.result);
     rq.onerror=()=>rej(rq.error);
   });
@@ -290,6 +403,21 @@ function idbPutBatch(db,recs){
     }catch(_){res(false)}
   });
 }
+function idbAll(db){return new Promise(res=>{try{const rq=db.transaction("stocks","readonly").objectStore("stocks").getAll();rq.onsuccess=()=>res(rq.result||[]);rq.onerror=()=>res([])}catch(_){res([])}})}
+function idbDeleteBatch(db,keys){return new Promise(res=>{try{const tx=db.transaction("stocks","readwrite"),st=tx.objectStore("stocks");for(const k of keys)st.delete(k);tx.oncomplete=()=>res(true);tx.onerror=tx.onabort=()=>res(false)}catch(_){res(false)}})}
+async function maintainCache(db){
+  if(!db)return {removed:0,count:0,quotaKnown:false};
+  const records=await idbAll(db),now=Date.now();
+  for(const r of records){if(CACHE_TOUCHES.has(r.key))r.lastAccess=now;r.bytes=r.bytes??estimateRecordBytes(r)}
+  CACHE_TOUCHES.clear();
+  let quota=null;
+  try{const est=typeof navigator!=="undefined"&&navigator.storage?.estimate?await navigator.storage.estimate():null;quota=Number.isFinite(est?.quota)?est.quota:null}catch(_){}
+  const maxBytes=quota===null?Infinity:quota * .2;
+  const keys=selectCacheEvictions(records,{ver:ALGO_VER,maxCount:7000,maxBytes,targetRatio:.9});
+  if(keys.length)await idbDeleteBatch(db,keys);
+  const survivors=records.filter(r=>!keys.includes(r.key));if(survivors.length)await idbPutBatch(db,survivors);
+  return {removed:keys.length,count:survivors.length,quotaKnown:quota!==null,maxBytes:Number.isFinite(maxBytes)?maxBytes:null};
+}
 
 async function getStock(key,pending){
   const f0=FILES.get(key);
@@ -297,11 +425,12 @@ async function getStock(key,pending){
   const file=f0.getFile?await f0.getFile():f0;
   const hit=DB?await idbGet(DB,key):null;
   if(isCacheValid(hit,file,RIGHTS_STAMP,ALGO_VER)){
+    CACHE_TOUCHES.add(key);
     return {dates:new Int32Array(hit.dates),closes:new Float64Array(hit.closes),vols:new Float64Array(hit.vols),warn:hit.warn,qStatus:hit.qStatus,qEvents:hit.qEvents,lastD:hit.lastD};
   }
   const buf=await file.arrayBuffer();
   const p=parseDayQfq(buf,key);
-  pending.push({key,ver:ALGO_VER,rv:RIGHTS_STAMP,size:file.size,mtime:file.lastModified,dates:p.dates.buffer,closes:p.closes.buffer,vols:p.vols.buffer,warn:p.warn,qStatus:p.qStatus,qEvents:p.qEvents,lastD:p.lastD});
+  const rec={key,ver:ALGO_VER,rv:RIGHTS_STAMP,size:file.size,mtime:file.lastModified,dates:p.dates.buffer,closes:p.closes.buffer,vols:p.vols.buffer,warn:p.warn,qStatus:p.qStatus,qEvents:p.qEvents,lastD:p.lastD,lastAccess:Date.now()};rec.bytes=estimateRecordBytes(rec);pending.push(rec);
   return p;
 }
 
@@ -323,18 +452,24 @@ function subScores(stk,s,e,R,zzth){
   const volS=Math.max(0,cosine(zscore(lv),R.zvol));
   const ws=windowStats(stk.closes,s,e);
   const vdd=Math.max(0,1-Math.min(1,Math.abs(ws.sd-R.stats.sd)/(R.stats.sd+1e-9)*0.7+Math.abs(ws.mdd-R.stats.mdd)*1.8));
-  return {cum,ret,zig,ma:maS,vol:volS,vdd};
+  return {cum,ret,zig,ma:maS,vol:volS,vdd,amp:amplitudeSimilarity(ws,R.stats)};
 }
 
 self.onmessage=async ev=>{
   const msg=ev.data;
   if(msg.type==="files"){
-    FILES=new Map(msg.entries);RIGHTS_STAMP=msg.rightsStamp||"raw";let decodeError=null;
-    try{RIGHTS=msg.gbbq?decodeGbbq(msg.gbbq,msg.keyB64):null}
+    FILES=new Map(msg.entries);BENCHMARK_FILES=new Map(msg.benchmarks||[]);BENCHMARKS=new Map();
+    for(const [key,f0] of BENCHMARK_FILES){
+      try{const f=f0.getFile?await f0.getFile():f0,p=parseDayBuffer(await f.arrayBuffer());if(p.dates.length)BENCHMARKS.set(key,p)}catch(_){}
+    }
+    RIGHTS_STAMP=msg.rightsStamp||"raw";let decodeError=null,diagnostics=null,continuity={status:"unchecked",reason:"未提供权息文件",samples:0};
+    try{
+      if(msg.gbbq){const decoded=decodeGbbq(msg.gbbq,msg.keyB64);RIGHTS=decoded.rights;diagnostics=decoded.diagnostics;const structural=validateRightsDiagnostics(diagnostics);if(structural.status!=="valid")throw new Error(structural.reason);continuity=await checkRightsContinuity(RIGHTS);if(continuity.status==="error")throw new Error(continuity.reason)}else RIGHTS=null;
+    }
     catch(err){RIGHTS=new Map();decodeError=err}
     RIGHTS_STATE=resolveRightsState(RIGHTS,decodeError);
     if(RIGHTS_STATE.status!=="valid")RIGHTS_STAMP="raw:"+RIGHTS_STATE.reason;
-    postMessage({type:"rightsStatus",ok:RIGHTS_STATE.status==="valid",status:RIGHTS_STATE.status,reason:RIGHTS_STATE.reason,stocks:RIGHTS?RIGHTS.size:0});return
+    postMessage({type:"rightsStatus",ok:RIGHTS_STATE.status==="valid",status:RIGHTS_STATE.status,reason:RIGHTS_STATE.reason,stocks:RIGHTS?RIGHTS.size:0,diagnostics,continuityStatus:continuity.status,continuityReason:continuity.reason,continuitySamples:continuity.samples});return
   }
   if(msg.type==="series"){
     try{
@@ -361,6 +496,9 @@ async function runMatch(cfg){
 
   const refKey=cfg.refKey;
   const timeframe=normalizeTimeframe(cfg.timeframe);
+  const benchmarkAgg=new Map();
+  for(const [key,daily] of BENCHMARKS)benchmarkAgg.set(key,aggregateSeries({...daily,lastD:daily.dates[daily.dates.length-1]},timeframe));
+  const benchmarkFor=key=>benchmarkAgg.get(benchmarkKeyFor(key))||null;
   const refDaily=await getStock(refKey,pending);
   if(!refDaily){post({type:"error",msg:"未找到参考股票数据"});return}
   const refStk=aggregateSeries(refDaily,timeframe,cfg.d2);
@@ -396,13 +534,7 @@ async function runMatch(cfg){
   const srcKeys=[...FILES.keys()];
   const keys=[];
   for(const k of srcKeys){
-    const mkt=k.slice(0,2),c=k.slice(2);
-    let board=null;
-    if(mkt==="bj")board="bj";
-    else if(c.startsWith("68"))board="kcb";
-    else if(c.startsWith("30"))board="cyb";
-    else if(mkt==="sh"&&/^(60)/.test(c)||mkt==="sz"&&/^(00)/.test(c))board="main";
-    else if(mkt==="sh"&&/^(51|56|58)/.test(c)||mkt==="sz"&&/^(15|16)/.test(c))board="etf";
+    const board=boardOfKey(k);
     if(!board)continue;
     if(!cfg.boards[board])continue;
     if(cfg.exST&&stSet.has(k))continue;
@@ -416,6 +548,9 @@ async function runMatch(cfg){
   const K_DTW=Math.min(K_COARSE,Math.max(20,Math.floor(cfg.dtwLimit)||200));
   const dtwBand=Math.min(24,Math.max(1,Math.floor(cfg.dtwBand)||6));
   const coarse=[];
+  const funnel={stocks:keys.length,windows:0,coarsePassed:0,globalKept:0,refined:0,dtw:0,deduped:0,shown:0};
+  const placeboPool=[];
+  const addPlacebos=(key,stk,starts)=>{for(const s of samplePlaceboStarts(key,starts,8)){const e=s+L-1;if(e>=stk.dates.length)continue;const packed=packStk(stk,s,e,benchmarkFor(key)),stats=windowStats(stk.closes,s,e);placeboPool.push({id:`${key}:${s}`,key,board:boardOfKey(key),startD:packed.startD,endD:packed.endD,sd:stats.sd,fut:packed.fut,benchmark:packed.benchmark,excess:packed.excess,lagBars:packed.lagBars})}};
   const scratch=new Float64Array(32);
   const mode=cfg.mode;
   const freshnessBars=timeframe==="month"?2:timeframe==="week"?6:30;
@@ -451,6 +586,7 @@ async function runMatch(cfg){
 
       if(mode==="peer"){
         if(key===refKey)continue;
+        funnel.windows++;
         const refWin={dates:refStk.dates.subarray(rs,re+1),periods:refStk.periods?refStk.periods.subarray(rs,re+1):undefined,closes:refStk.closes.subarray(rs,re+1),vols:refStk.vols.subarray(rs,re+1)};
         const peerSlice=sliceSeriesByDate(stk,refStartD,refEndD);
         const al=alignCommonDates(refWin,peerSlice);
@@ -464,15 +600,16 @@ async function runMatch(cfg){
         const ret=Math.max(0,cosine(zscore(ra),zscore(rb)));
         if(0.5*cum+0.5*ret<0.3){skip("同期粗筛未通过",key);continue}
         const s=al.bIndices[0],e=al.bIndices[al.bIndices.length-1];
+        addPlacebos(key,stk,[s]);
         const peerStk={closes:al.bCloses,vols:al.bVols};peerStk.ma20=ma20Arr(peerStk.closes);
         const peerRef={zcum:zscore(al.aCloses.map(x=>Math.log(x))),zret:zscore(retSlice(al.aCloses,0,al.aCloses.length-1)),
           amps:zigAmps(al.aCloses,cfg.zzth),stats:windowStats(al.aCloses,0,al.aCloses.length-1)};
         const refMa=ma20Arr(al.aCloses),rma=new Float64Array(al.aCloses.length),rvol=new Float64Array(al.aCloses.length);
         for(let q=0;q<al.aCloses.length;q++){rma[q]=Number.isNaN(refMa[q])?0:(al.aCloses[q]-refMa[q])/refMa[q];rvol[q]=Math.log(1+al.aVols[q])}
         peerRef.zma=zscore(rma);peerRef.zvol=zscore(rvol);
-        const sub=subScores(peerStk,0,peerStk.closes.length-1,peerRef,cfg.zzth);
+        funnel.coarsePassed++;const sub=subScores(peerStk,0,peerStk.closes.length-1,peerRef,cfg.zzth);
         sub.cum=cum;sub.ret=ret;
-        coarse.push({key,s,e,sub,warn:stk.warn,stk:packStk(stk,s,e),coarse:0.5*cum+0.5*ret});
+        coarse.push({key,s,e,sub,warn:stk.warn,stk:packStk(stk,s,e,benchmarkFor(key)),coarse:0.5*cum+0.5*ret});
       }else{
         const minLen=mode==="recent"?L:L+5;
         if(n<minLen){skip("窗口数据不足",key);continue}
@@ -483,6 +620,7 @@ async function runMatch(cfg){
           let maxE=n-1;if(cfg.isolate)maxE=historicalMaxEnd(stk.dates,refStartD);
           starts=[];for(let s=0;s+L-1<=maxE;s+=cfg.step)starts.push(s);
         }
+        addPlacebos(key,stk,starts);
         const lsAll=new Float64Array(n);
         for(let i=0;i<n;i++)lsAll[i]=Math.log(Math.max(stk.closes[i],1e-9));
         let bestOfStock=[];
@@ -494,6 +632,7 @@ async function runMatch(cfg){
             if(mode==="recent"&&overlapRatio({s,e},{s:rs,e:re},L)>0.7)continue;
             if(mode!=="recent"&&!(e<rs||s>re))continue;
           }
+          funnel.windows++;
           for(let q=0;q<32;q++){
             const t=q*(L-1)/31,j=Math.floor(t),f=t-j;
             const a=lsAll[s+j],b=s+j+1<=e?lsAll[s+j+1]:a;
@@ -505,7 +644,7 @@ async function runMatch(cfg){
           let dot=0;
           for(let q=0;q<32;q++)dot+=((scratch[q]-m)/sd)*R.z32[q];
           const cs=dot/32;
-          if(cs>coarseThresholdEffective)bestOfStock.push([cs,s]);
+          if(cs>coarseThresholdEffective){funnel.coarsePassed++;bestOfStock.push([cs,s])}
         }
         if(!bestOfStock.length){skip("形态粗筛未通过",key);continue}
         bestOfStock.sort((a,b)=>b[0]-a[0]);
@@ -519,6 +658,7 @@ async function runMatch(cfg){
   }
   if(pending.length&&DB)await idbPutBatch(DB,pending.splice(0));
   const diversified=mergePerStockCandidates(coarse,10,K_COARSE);
+  funnel.globalKept=diversified.length;
   coarse.length=0;coarse.push(...diversified);
 
   post({type:"progress",done:total,total,phase:"精排",rate:"",eta:""});
@@ -535,23 +675,25 @@ async function runMatch(cfg){
         if(daily){stk=aggregateSeries(daily,timeframe);stk.ma20=ma20Arr(stk.closes)}
       }catch(_){}
       for(const c of cands){
-        if(stk&&c.e<stk.dates.length){c.sub=subScores(stk,c.s,c.e,R,cfg.zzth);c.stk=packStk(stk,c.s,c.e)}
+        if(stk&&c.e<stk.dates.length){c.sub=subScores(stk,c.s,c.e,R,cfg.zzth);c.stk=packStk(stk,c.s,c.e,benchmarkFor(key))}
         else c.drop=true;
       }
       if(++rdone%40===0)await new Promise(r=>setTimeout(r));
     }
     if(pending.length&&DB)await idbPutBatch(DB,pending.splice(0));
     const finalists=coarse.filter(c=>!c.drop&&c.sub&&c.stk);
+    funnel.refined=finalists.length;
     coarse.length=0;coarse.push(...finalists);
   }
-  const W=cfg.weights,wsum=W.ret+W.cum+W.zig+W.ma+W.vol+W.vdd||1;
+  const W=cfg.weights,wsum=W.ret+W.cum+W.zig+W.ma+W.vol+W.vdd+(W.amp||0)||1;
   for(const c of coarse){
     const s=c.sub;
-    c.score=(W.ret*s.ret+W.cum*s.cum+W.zig*s.zig+W.ma*s.ma+W.vol*s.vol+W.vdd*s.vdd)/wsum;
+    c.score=(W.ret*s.ret+W.cum*s.cum+W.zig*s.zig+W.ma*s.ma+W.vol*s.vol+W.vdd*s.vdd+(W.amp||0)*s.amp)/wsum;
     if(c.warn)c.score*=0.92;
   }
   coarse.sort((a,b)=>b.score-a.score);
   const dtwTop=coarse.slice(0,K_DTW),wd=Math.min(Math.max(cfg.wDtw,0),50)/100;
+  funnel.dtw=dtwTop.length;
   for(const c of dtwTop){
     const z=zscore(resample(c.stk.win.map(x=>Math.log(x)),48));
     const dist=dtwDist(z,R.z48,dtwBand);
@@ -571,17 +713,23 @@ async function runMatch(cfg){
     }
     if(ov)continue;
     arr.push(c);kept.push(c);
-    if(kept.length>=cfg.topN)break;
   }
+  funnel.deduped=kept.length;
 
   const toRow=c=>{
     const st=c.stk;
-    return {key:c.key,startD:st.startD,endD:st.endD,score:c.score,sub:c.sub,warn:c.warn,
-      fut:st.fut,nn:st.nnSmall,futNn:st.futNn,lastD:st.lastD};
+    return {key:c.key,board:boardOfKey(c.key),startD:st.startD,endD:st.endD,sd:windowStats(st.win,0,st.win.length-1).sd,score:c.score,sub:c.sub,warn:c.warn,
+      fut:st.fut,benchmark:st.benchmark,excess:st.excess,lagBars:st.lagBars,benchmarkKey:benchmarkKeyFor(c.key),nn:st.nnSmall,futNn:st.futNn,lastD:st.lastD};
   };
-  const rows=kept.map(toRow),statRows=dedupeOverlaps(kept,0.7,L).map(toRow),statSummary={};
-  for(const hk of["r5","r10","r20","r60"]){const raw=statRows.map(r=>r.fut[hk]).filter(Number.isFinite),clusters=clusterHorizonValues(statRows,hk,7).sort((a,b)=>a-b);statSummary[hk]={rawN:raw.length,periodN:clusters.length,win:clusters.length?clusters.filter(x=>x>0).length/clusters.length:null,interval:bootstrapWinInterval(clusters),median:clusters.length?clusters[Math.floor(clusters.length/2)]:null}}
-  post({type:"result",rows,statRows,meta:{mode,timeframe,recentBars:effectiveRecentBars,scanned:total,skipped,skipReasons,skipDetails,settings:{preset:cfg.preset||"custom",coarseThreshold,coarseThresholdEffective,K_COARSE,K_DTW,dtwBand},statSummary,L,refStartD,refEndD,elapsed:((Date.now()-t0)/1000).toFixed(1),
+  const rows=kept.slice(0,cfg.topN).map(toRow),statRows=dedupeOverlaps(kept,0.7,L).map(toRow),statSummary={};funnel.shown=rows.length;
+  const placebo={};for(const hk of["r5","r10","r20","r60"])placebo[hk]=placeboSummary(statRows,placeboPool,hk,200,20260703);
+  for(const hk of["r5","r10","r20","r60"]){
+    const maturity=summarizeHorizon(statRows,hk),family=maturity.excessN?"excess":"fut";
+    const clusters=(family==="fut"?clusterHorizonValues(statRows,hk,7):clusterHorizonValues(statRows,hk,7,family)).sort((a,b)=>a-b);
+    statSummary[hk]={...maturity,family,periodN:clusters.length,win:clusters.length?clusters.filter(x=>x>0).length/clusters.length:null,interval:bootstrapWinInterval(clusters),median:medianOf(clusters)};
+  }
+  try{const cache=await maintainCache(DB);post({type:"cacheStatus",...cache})}catch(err){post({type:"cacheStatus",error:String(err)})}
+  post({type:"result",rows,statRows,meta:{mode,timeframe,recentBars:effectiveRecentBars,scanned:total,skipped,skipReasons,skipDetails,funnel:normalizeFunnel(funnel),placebo,settings:{preset:cfg.preset||"custom",coarseThreshold,coarseThresholdEffective,K_COARSE,K_DTW,dtwBand},statSummary,L,refStartD,refEndD,elapsed:((Date.now()-t0)/1000).toFixed(1),
     refWarn:refStk.warn,candidates:coarse.length,refNn:Array.from(resample(refStk.closes.subarray(rs,re+1),120)).map(x=>x/refStk.closes[rs])}});
 }
 
@@ -590,13 +738,19 @@ function lastIdxBefore(dates,d){
   while(lo<=hi){const m=(lo+hi)>>1;if(dates[m]<d){ans=m+1;lo=m+1}else hi=m-1}
   return ans;
 }
-function packStk(stk,s,e){
+function packStk(stk,s,e,benchmarkSeries=null){
   const L=e-s+1,c0=stk.closes[s];
   const win=Array.from(stk.closes.subarray(s,e+1));
   const nnSmall=Array.from(resample(stk.closes.subarray(s,e+1),120)).map(x=>x/c0);
   const n=stk.dates.length;
-  const fut={};
-  for(const h of[5,10,20,60])fut["r"+h]=e+h<n?stk.closes[e+h]/stk.closes[e]-1:null;
+  const fut={},benchmark={},excess={},lagBars={};
+  for(const h of[5,10,20,60]){
+    const hk="r"+h,valid=e+h<n;
+    fut[hk]=valid?stk.closes[e+h]/stk.closes[e]-1:null;
+    benchmark[hk]=valid?benchmarkReturn(benchmarkSeries,stk.dates[e],stk.dates[e+h]):null;
+    excess[hk]=excessReturn(fut[hk],benchmark[hk]);
+    lagBars[hk]=valid?n-1-e:null;
+  }
   let mu=null,md=null;
   if(e+60<n){
     let pk=stk.closes[e];mu=0;md=0;
@@ -610,7 +764,7 @@ function packStk(stk,s,e){
   fut.maxUp=mu;fut.maxDn=md;
   const fe=Math.min(n-1,e+60);
   const futNn=fe>e?Array.from(stk.closes.subarray(e,fe+1)).map(x=>x/c0):[];
-  return {startD:stk.dates[s],endD:stk.dates[e],win,nnSmall,fut,futNn:futNn.length>1?Array.from(resample(new Float64Array(futNn),Math.min(60,futNn.length))):[],lastD:stk.lastD};
+  return {startD:stk.dates[s],endD:stk.dates[e],win,nnSmall,fut,benchmark,excess,lagBars,futNn:futNn.length>1?Array.from(resample(new Float64Array(futNn),Math.min(60,futNn.length))):[],lastD:stk.lastD};
 }
 self.__KLINE_TEST_API__={version:ALGO_VER,parseDayBuffer,resolveRightsState,corporateActionFactor,applyCorporateActions,
-  aggregateSeries,periodKey,zscore,cosine,dtwDist,zigAmps,alignCommonDates,sliceSeriesByDate,dedupeOverlaps,mergePerStockCandidates,historicalMaxEnd,recentWindowStarts,recentFreshnessCutoff,clusterHorizonValues,bootstrapWinInterval,isCacheValid,adaptiveCoarseThreshold};
+  aggregateSeries,periodKey,zscore,cosine,dtwDist,zigAmps,alignCommonDates,sliceSeriesByDate,dedupeOverlaps,mergePerStockCandidates,historicalMaxEnd,recentWindowStarts,recentFreshnessCutoff,clusterHorizonValues,bootstrapWinInterval,isCacheValid,adaptiveCoarseThreshold,boardOfKey,benchmarkKeyFor,indexOnOrBefore,benchmarkReturn,excessReturn,medianOf,summarizeHorizon,ratioSimilarity,amplitudeSimilarity,estimateRecordBytes,selectCacheEvictions,validateRightsDiagnostics,validateContinuity,normalizeFunnel,samplePlaceboStarts,rankPlacebos,placeboSummary};

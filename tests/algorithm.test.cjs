@@ -5,7 +5,7 @@ const HTML = findHtml();
 
 test('worker exposes versioned pure algorithm API', () => {
   const { api } = loadWorker(HTML);
-  assert.equal(api.version, 9);
+  assert.equal(api.version, 10);
   assert.equal(typeof api.parseDayBuffer, 'function');
   assert.equal(typeof api.applyCorporateActions, 'function');
 });
@@ -91,6 +91,103 @@ test('daily series aggregates to canonical weekly and monthly OHLCV bars', () =>
   assert.deepEqual(Array.from(monthly.dates), [20260116, 20260202]);
   assert.deepEqual(Array.from(monthly.closes), [15.5, 16.5]);
   assert.deepEqual(Array.from(monthly.vols), [210, 70]);
+});
+
+test('board benchmark mapping uses the approved local indexes', () => {
+  const { api } = loadWorker(HTML);
+  assert.equal(api.benchmarkKeyFor('sh600000'), 'sh000300');
+  assert.equal(api.benchmarkKeyFor('sz000001'), 'sh000300');
+  assert.equal(api.benchmarkKeyFor('sz300001'), 'sz399006');
+  assert.equal(api.benchmarkKeyFor('sh688001'), 'sh000688');
+  assert.equal(api.benchmarkKeyFor('bj899001'), 'bj899050');
+  assert.equal(api.benchmarkKeyFor('sh510300'), 'sh000300');
+});
+
+test('benchmark return aligns each endpoint to the nearest prior date', () => {
+  const { api } = loadWorker(HTML);
+  const benchmark={dates:Int32Array.from([20260105,20260107,20260109]),closes:Float64Array.from([100,102,105])};
+  assert.ok(Math.abs(api.benchmarkReturn(benchmark,20260106,20260110)-.05)<1e-12);
+  assert.equal(api.benchmarkReturn(benchmark,20250101,20260110),null);
+});
+
+test('excess return uses compounded subtraction and preserves missing benchmarks', () => {
+  const { api } = loadWorker(HTML);
+  assert.ok(Math.abs(api.excessReturn(.10,.04) - (1.10/1.04-1)) < 1e-12);
+  assert.equal(api.excessReturn(.10,null), null);
+});
+
+test('horizon summary reports completeness and median lag bars', () => {
+  const { api } = loadWorker(HTML);
+  const rows=[
+    {endD:20260101,fut:{r5:.1},excess:{r5:.05},lagBars:{r5:8}},
+    {endD:20260102,fut:{r5:null},excess:{r5:null},lagBars:{r5:null}},
+    {endD:20260120,fut:{r5:.2},excess:{r5:.12},lagBars:{r5:12}}
+  ];
+  const s=api.summarizeHorizon(rows,'r5');
+  assert.equal(s.totalN,3);
+  assert.equal(s.rawN,2);
+  assert.equal(s.completeRate,2/3);
+  assert.equal(s.medianLagBars,10);
+});
+
+test('amplitude similarity is symmetric and neutral for invalid scales', () => {
+  const { api } = loadWorker(HTML);
+  assert.ok(Math.abs(api.ratioSimilarity(2,1)-api.ratioSimilarity(1,2))<1e-12);
+  assert.equal(api.ratioSimilarity(0,1),.5);
+  assert.equal(api.amplitudeSimilarity({sd:.02,range:.10},{sd:.02,range:.10}),1);
+});
+
+test('cache eviction removes stale versions then least-recently-used records', () => {
+  const { api } = loadWorker(HTML);
+  const records=[
+    {key:'a',ver:8,lastAccess:9,bytes:10},
+    {key:'b',ver:10,lastAccess:1,bytes:10},
+    {key:'c',ver:10,lastAccess:2,bytes:10}
+  ];
+  assert.deepEqual(Array.from(api.selectCacheEvictions(records,{ver:10,maxCount:3,maxBytes:25,targetRatio:.9})),['a']);
+  assert.deepEqual(Array.from(api.selectCacheEvictions(records.slice(1),{ver:10,maxCount:1,maxBytes:25,targetRatio:.9})),['b']);
+});
+
+test('rights diagnostics reject sparse, invalid and implausible records', () => {
+  const { api } = loadWorker(HTML);
+  assert.equal(api.validateRightsDiagnostics({validEvents:99,codes:30,invalid:0,candidates:99}).status,'error');
+  assert.equal(api.validateRightsDiagnostics({validEvents:100,codes:29,invalid:0,candidates:100}).status,'error');
+  assert.equal(api.validateRightsDiagnostics({validEvents:100,codes:30,invalid:12,candidates:112}).status,'error');
+  assert.equal(api.validateRightsDiagnostics({validEvents:100,codes:30,invalid:11,candidates:111}).status,'valid');
+});
+
+test('rights continuity rejects material worsening and allows insufficient samples', () => {
+  const { api } = loadWorker(HTML);
+  assert.equal(api.validateContinuity([{raw:.04,adjusted:.08},{raw:.03,adjusted:.07},{raw:.02,adjusted:.06},{raw:.03,adjusted:.07},{raw:.02,adjusted:.06}]).status,'error');
+  assert.equal(api.validateContinuity([{raw:.04,adjusted:.01}]).status,'unchecked');
+});
+
+test('funnel stages are monotonic after coarse screening', () => {
+  const { api } = loadWorker(HTML);
+  const f=api.normalizeFunnel({stocks:100,windows:10000,coarsePassed:800,globalKept:500,refined:480,dtw:20,deduped:60,shown:50});
+  assert.deepEqual(JSON.parse(JSON.stringify(f)),{stocks:100,windows:10000,coarsePassed:800,globalKept:500,refined:480,dtw:20,deduped:60,shown:50});
+  assert.throws(()=>api.normalizeFunnel({stocks:1,windows:10,coarsePassed:11,globalKept:1,refined:1,dtw:1,deduped:1,shown:1}));
+});
+
+test('placebo window sampling is deterministic and capped per stock', () => {
+  const { api } = loadWorker(HTML);
+  const starts=Array.from({length:40},(_,i)=>i);
+  assert.deepEqual(Array.from(api.samplePlaceboStarts('sh600000',starts,8,20260703)),Array.from(api.samplePlaceboStarts('sh600000',starts,8,20260703)));
+  assert.equal(api.samplePlaceboStarts('sh600000',starts,8,20260703).length,8);
+});
+
+test('placebo matching prioritizes board then date and volatility', () => {
+  const { api } = loadWorker(HTML);
+  const target={key:'sh600000',board:'main',endD:20260110,sd:.02};
+  const pool=[{key:'sz300001',board:'cyb',endD:20260110,sd:.02,id:'wrong-board'},{key:'sh600001',board:'main',endD:20260109,sd:.08,id:'near-date'},{key:'sh600002',board:'main',endD:20260109,sd:.021,id:'best'}];
+  assert.equal(api.rankPlacebos(target,pool)[0].id,'best');
+});
+
+test('matched placebo summary is reproducible for a fixed seed', () => {
+  const { api } = loadWorker(HTML);
+  const matches=[{key:'sh600000',board:'main',endD:20260110,sd:.02,excess:{r5:.03}}];
+  const pool=[{id:'p1',key:'sh600001',board:'main',endD:20260110,sd:.02,excess:{r5:.01}}];
+  assert.deepEqual(JSON.parse(JSON.stringify(api.placeboSummary(matches,pool,'r5',200,20260703))),JSON.parse(JSON.stringify(api.placeboSummary(matches,pool,'r5',200,20260703))));
 });
 
 test('similarity primitives are stable on edge cases', () => {

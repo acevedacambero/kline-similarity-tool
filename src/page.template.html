@@ -104,6 +104,7 @@ details summary{cursor:pointer;font-size:13px;color:#2a78d6;margin-top:8px}
         <span class="wgt">均线结构<input type="number" id="wMa" value="15"></span>
         <span class="wgt">量能结构<input type="number" id="wVol" value="10"></span>
         <span class="wgt">波动/回撤<input type="number" id="wVdd" value="10"></span>
+        <span class="wgt">幅度相似<input type="number" id="wAmp" value="10"></span>
         <span class="wgt">DTW重排权重%<input type="number" id="wDtw" value="15"></span>
       </div>
     </details>
@@ -135,6 +136,7 @@ details summary{cursor:pointer;font-size:13px;color:#2a78d6;margin-top:8px}
 
 <div class="panel" id="matchPanel" style="display:none">
   <h2 id="matchTitle">匹配结果</h2>
+  <div class="hint" id="funnel"></div>
   <div class="stats" id="btStats"></div>
   <p class="hint" id="btNote"></p>
   <div style="margin:6px 0"><button id="btnCsv" class="sec mini">导出CSV</button></div>
@@ -154,11 +156,12 @@ details summary{cursor:pointer;font-size:13px;color:#2a78d6;margin-top:8px}
 <script>
 "use strict";
 const $=id=>document.getElementById(id);
-const UI_ALGO_VER=9;
-let files=new Map(), names={}, gbbqFile=null, rightsState="raw", ref=null, worker=null, lastRows=null, lastStatRows=null, lastMeta=null, referenceDates=null, sortKey="score", sortAsc=false;
+const UI_ALGO_VER=10;
+let files=new Map(), benchmarkFiles=new Map(), names={}, gbbqFile=null, rightsState="raw", rightsContinuity="unchecked", ref=null, worker=null, lastRows=null, lastStatRows=null, lastMeta=null, referenceDates=null, sortKey="score", sortAsc=false;
 let seriesSeq=0;const seriesWait=new Map();
 
 const A_PREFIX={sh:["600","601","603","605","688","51","56","58"],sz:["000","001","002","003","300","301","15","16"],bj:["43","83","87","92"]};
+const INDEX_KEYS=new Set(["sh000300","sz399006","sh000688","bj899050"]);
 
 function setMsg(phase,text){$("msg").textContent=(phase?`【${phase}】`:"")+text}
 function checkBrowserCapabilities(){
@@ -175,7 +178,7 @@ function cleanupLegacyEastmoneyCache(){
   const marker="kline_em_cache_cleaned_v1";
   try{if(localStorage.getItem(marker)==="1")return}catch(_){}
   try{
-    const rq=indexedDB.open("kline_tool_v2",1);
+    const rq=indexedDB.open("kline_tool_v2");
     rq.onupgradeneeded=()=>{if(!rq.result.objectStoreNames.contains("stocks"))rq.result.createObjectStore("stocks",{keyPath:"key"})};
     rq.onsuccess=()=>{
       const db=rq.result;
@@ -200,7 +203,7 @@ $("btnDir").onclick=async()=>{
     return;
   }
   setMsg("读取","正在扫描目录…（仅本地读取，不会上传）");
-  files=new Map();names={};gbbqFile=null;
+  files=new Map();benchmarkFiles=new Map();names={};gbbqFile=null;
   const getDir=async(h,path)=>{let cur=h;for(const seg of path){try{cur=await cur.getDirectoryHandle(seg)}catch(_){return null}}return cur};
   let vip=await getDir(root,["vipdoc"])||root;
   const tnf=[];
@@ -209,6 +212,7 @@ $("btnDir").onclick=async()=>{
     if(!lday)continue;
     for await(const[nm,h]of lday.entries()){
       const m=nm.match(/^(sh|sz|bj)(\d{6})\.day$/);
+      if(m&&INDEX_KEYS.has(m[1]+m[2])){benchmarkFiles.set(m[1]+m[2],h);continue}
       if(m&&A_PREFIX[m[1]]&&A_PREFIX[m[1]].some(x=>m[2].startsWith(x)))files.set(m[1]+m[2],h);
     }
   }
@@ -221,12 +225,13 @@ $("btnDir").onclick=async()=>{
 };
 
 $("dir").addEventListener("change",async e=>{
-  files=new Map();names={};gbbqFile=null;
+  files=new Map();benchmarkFiles=new Map();names={};gbbqFile=null;
   const tnf=[];
   for(const f of e.target.files){
     const p=(f.webkitRelativePath||f.name).replace(/\\/g,"/");
     let m=p.match(/(sh|sz|bj)\/lday\/(sh|sz|bj)(\d{6})\.day$/);
     if(m){
+      if(INDEX_KEYS.has(m[2]+m[3])){benchmarkFiles.set(m[2]+m[3],f);continue}
       if(A_PREFIX[m[2]]&&A_PREFIX[m[2]].some(x=>m[3].startsWith(x)))files.set(m[2]+m[3],f);
       continue;
     }
@@ -284,7 +289,7 @@ async function initWorker(){
   if(gbbqFile){
     try{gbbq=await gbbqFile.arrayBuffer();rightsStamp=`${gbbqFile.size}:${gbbqFile.lastModified}`}catch(_){}
   }
-  worker.postMessage({type:"files",entries:[...files.entries()],gbbq,keyB64:$("gbbqKey").textContent.trim(),rightsStamp});
+  worker.postMessage({type:"files",entries:[...files.entries()],benchmarks:[...benchmarkFiles.entries()],gbbq,keyB64:$("gbbqKey").textContent.trim(),rightsStamp});
 }
 
 function getAdjustedSeries(key,timeframe="day",endD=null){
@@ -302,7 +307,7 @@ function lastIndexOnOrBefore(dates,target){
 }
 
 const PREF_KEY="kline_prefs_v1";
-const PREF_IDS=["timeframe","zz","step","recentBars","perStock","topN","isolate","fMain","fCyb","fKcb","fBj","fEtf","fSt","fNew","wRet","wCum","wZig","wMa","wVol","wVdd","wDtw","matchPreset","coarseTh","coarseLimit","dtwLimit","dtwBand"];
+const PREF_IDS=["timeframe","zz","step","recentBars","perStock","topN","isolate","fMain","fCyb","fKcb","fBj","fEtf","fSt","fNew","wRet","wCum","wZig","wMa","wVol","wVdd","wAmp","wDtw","matchPreset","coarseTh","coarseLimit","dtwLimit","dtwBand"];
 function savePrefs(){
   try{
     const o={};
@@ -544,7 +549,7 @@ $("btnM").onclick=()=>{
     perStock:parseInt($("perStock").value),topN:parseInt($("topN").value),
     boards:{main:$("fMain").checked,cyb:$("fCyb").checked,kcb:$("fKcb").checked,bj:$("fBj").checked,etf:$("fEtf").checked},
     exST:$("fSt").checked,stKeys,exNew:$("fNew").checked,
-    weights:{ret:+$("wRet").value||0,cum:+$("wCum").value||0,zig:+$("wZig").value||0,ma:+$("wMa").value||0,vol:+$("wVol").value||0,vdd:+$("wVdd").value||0},
+    weights:{ret:+$("wRet").value||0,cum:+$("wCum").value||0,zig:+$("wZig").value||0,ma:+$("wMa").value||0,vol:+$("wVol").value||0,vdd:+$("wVdd").value||0,amp:+$("wAmp").value||0},
     wDtw:+$("wDtw").value||0
   };
   $("btnM").disabled=true;$("btnC").style.display="";
@@ -564,7 +569,10 @@ function onWorkerMsg(ev){
   const m=ev.data;
   if(m.type==="rightsStatus"){
     rightsState=m.status||"error";
+    rightsContinuity=m.continuityStatus||"unchecked";
     setMsg("复权",m.ok?`真实权息数据已解密，覆盖 ${m.stocks} 只证券；后续分析与匹配均使用前复权。`:`权息状态：${m.reason||"读取失败"}；将明确使用原始价格。`);
+  }else if(m.type==="cacheStatus"){
+    if(m.error)setMsg("缓存","缓存维护未完成，不影响本次结果："+m.error);
   }else if(m.type==="series"){
     const done=seriesWait.get(m.reqId);if(done){seriesWait.delete(m.reqId);done(m)}
   }else if(m.type==="progress"){
@@ -585,6 +593,7 @@ function renderResults(){
   const rows=lastRows,meta=lastMeta;
   const statRows=lastStatRows||rows;
   $("matchPanel").style.display="block";
+  const f=meta.funnel||{};$("funnel").textContent=`证券 ${f.stocks??0} → 窗口 ${(f.windows??0).toLocaleString()} → 粗筛 ${(f.coarsePassed??0).toLocaleString()} → 全局 ${f.globalKept??0} → 精排 ${f.refined??0}（其中DTW重排 ${f.dtw??0}）→ 去重 ${f.deduped??0} → 展示 ${f.shown??0}`;
   const modeTxt=meta.mode==="hist"?"历史滑窗搜索":meta.mode==="recent"?"近期相似区间":"同期联动";
   const timeframe=meta.timeframe||"day",unit=TF_UNIT[timeframe];
   $("matchTitle").textContent=`匹配结果 · ${TF_LABEL[timeframe]} · ${modeTxt} · 窗口${meta.L}个${unit}线周期${meta.mode==="recent"?` · 近期范围${meta.recentBars}个周期`:""} · 扫描${meta.scanned}只 · 跳过${meta.skipped||0}只 · 耗时${meta.elapsed}秒`+(meta.refWarn?" · ⚠未复权":" · 真实权息前复权");
@@ -602,18 +611,21 @@ function renderResults(){
     const v=document.createElement("div");v.className="v";v.style.fontSize="15px";
     if(summary&&summary.periodN){
       const[lo,hi]=summary.interval;
-      k.textContent=`${label}（展示n=${rows.length}，有效n=${summary.rawN}，独立时段n=${summary.periodN}）`;
-      v.textContent=`簇级胜率${(summary.win*100).toFixed(0)}% Bootstrap 95%区间${(lo*100).toFixed(0)}–${(hi*100).toFixed(0)}% 中位${pct(summary.median)}`;
+      k.textContent=`${label}（有效n=${summary.rawN}/${summary.totalN}，完整率${(summary.completeRate*100).toFixed(0)}%，独立时段n=${summary.periodN}）`;
+      const kind=summary.family==="excess"?"超额":"绝对";
+      v.textContent=`${kind}簇级胜率${(summary.win*100).toFixed(0)}% · Bootstrap 95%区间${(lo*100).toFixed(0)}–${(hi*100).toFixed(0)}% · 中位${pct(summary.median)} · 中位滞后${summary.medianLagBars??"—"}${unit}`;
       v.className="v "+(summary.median>=0?"up":"dn");
     }else{k.textContent=label;v.textContent="样本不足"}
     div.append(k,v);bt.appendChild(div);
   }
+  {const p=meta.placebo?.r20,div=document.createElement("div");div.className="stat";const k=document.createElement("div");k.className="k";k.textContent="随机基线（200轮）";const v=document.createElement("div");v.className="v";v.style.fontSize="15px";v.textContent=p&&p.rounds?`20${unit}：匹配中位${pct(p.matchMedian)}，随机中位${pct(p.placeboMedian)}；优于随机${(p.betterRate*100).toFixed(0)}%轮（配对${p.pairedN}）`:"可配对样本不足";div.append(k,v);bt.appendChild(div)}
   const topSkips=Object.entries(meta.skipReasons||{}).sort((a,b)=>b[1]-a[1]).slice(0,3).map(([k,n])=>`${k}${n}只`).join("、");
-  $("btNote").textContent="注意：统计先做同股重叠去重，再按相近结束日期聚类并计算Bootstrap区间；仍存在数据挖掘及幸存者偏差。"+(topSkips?`主要淘汰：${topSkips}。`:"")+(meta.mode==="hist"?"已"+(rows.some(r=>r.endD>=meta.refStartD)?"关闭":"启用")+"防前视隔离。":meta.mode==="recent"?"近期模式用于寻找当前或近期形态，不等价于历史回测；最新窗口通常没有完整未来收益。":"同期模式下\"未来收益\"为目标区间结束后的实际走势。");
+  const passRate=f.windows?f.coarsePassed/f.windows:0,thresholdHint=passRate<.001?"粗筛通过率很低，可考虑降低门槛。":passRate>.20?"粗筛通过率很高，可考虑提高门槛。":"";
+  $("btNote").textContent="注意：有本地指数时默认显示超额簇级胜率；统计先做同股重叠去重，再按相近结束日期聚类并计算Bootstrap区间。"+thresholdHint+(topSkips?`主要淘汰：${topSkips}。`:"")+(meta.mode==="hist"?"已"+(rows.some(r=>r.endD>=meta.refStartD)?"关闭":"启用")+"防前视隔离。":meta.mode==="recent"?"近期模式用于寻找当前或近期形态，不等价于历史回测；最新窗口通常没有完整未来收益。":"同期模式下\"未来收益\"为目标区间结束后的实际走势。");
 
   const thead=$("matchTable").querySelector("thead");thead.textContent="";
   const cols=[["idx","#",false],["key","代码",true],["name","名称",false],["range","匹配区间",true],["nn","走势",false],
-    ["score","综合分",true],["cum","累计走势",true],["ret","收益序列",true],["zig","拐点",true],["ma","均线",true],["vol","量能",true],["dtw","DTW",true],
+    ["score","综合分",true],["cum","累计走势",true],["ret","收益序列",true],["zig","拐点",true],["ma","均线",true],["vol","量能",true],["amp","幅度",true],["dtw","DTW",true],
     ["r5",`+5${unit}`,true],["r10",`+10${unit}`,true],["r20",`+20${unit}`,true],["r60",`+60${unit}`,true],["maxUp",`60${unit}最大涨`,true],["maxDn",`60${unit}最大回撤`,true]];
   const trh=document.createElement("tr");
   for(const[k2,label,sortable]of cols){
@@ -626,7 +638,7 @@ function renderResults(){
   const get=r=>{
     if(sortKey==="key")return r.key;
     if(sortKey==="range")return r.startD;
-    if(["cum","ret","zig","ma","vol","dtw"].includes(sortKey))return r.sub[sortKey]??-1;
+    if(["cum","ret","zig","ma","vol","amp","dtw"].includes(sortKey))return r.sub[sortKey]??-1;
     if(["r5","r10","r20","r60","maxUp","maxDn"].includes(sortKey))return r.fut[sortKey]??-999;
     return r[sortKey];
   };
@@ -639,7 +651,7 @@ function renderResults(){
   sorted.forEach((r,i)=>{
     const tr=document.createElement("tr");tr.className="row";
     const cells=[String(i+1),r.key.slice(2)+(r.warn?" ⚠":""),names[r.key]||"—",fmtD(r.startD)+"~"+fmtD(r.endD),null,
-      r.score.toFixed(3),(r.sub.cum*100).toFixed(0)+"%",(r.sub.ret*100).toFixed(0)+"%",(r.sub.zig*100).toFixed(0)+"%",(r.sub.ma*100).toFixed(0)+"%",(r.sub.vol*100).toFixed(0)+"%",
+      r.score.toFixed(3),(r.sub.cum*100).toFixed(0)+"%",(r.sub.ret*100).toFixed(0)+"%",(r.sub.zig*100).toFixed(0)+"%",(r.sub.ma*100).toFixed(0)+"%",(r.sub.vol*100).toFixed(0)+"%",(r.sub.amp*100).toFixed(0)+"%",
       r.sub.dtw!==undefined?(r.sub.dtw*100).toFixed(0)+"%":"—",
       pct(r.fut.r5),pct(r.fut.r10),pct(r.fut.r20),pct(r.fut.r60),pct(r.fut.maxUp),pct(r.fut.maxDn)];
     cells.forEach((c,ci)=>{
@@ -654,8 +666,8 @@ function renderResults(){
         g.stroke();
       }else{
         td.textContent=c;
-        if(ci>=12&&ci<=16){const v2=[r.fut.r5,r.fut.r10,r.fut.r20,r.fut.r60,r.fut.maxUp][ci-12];if(v2!==null&&v2!==undefined)td.className=v2>=0?"up":"dn"}
-        if(ci===17)td.className="dn";
+        if(ci>=13&&ci<=17){const v2=[r.fut.r5,r.fut.r10,r.fut.r20,r.fut.r60,r.fut.maxUp][ci-13];if(v2!==null&&v2!==undefined)td.className=v2>=0?"up":"dn"}
+        if(ci===18)td.className="dn";
       }
       tr.appendChild(td);
     });
@@ -720,14 +732,16 @@ $("btnCsv").onclick=()=>{
   if(!lastRows)return;
   const rowKey=r=>`${r.key}|${r.startD}|${r.endD}`;
   const statSampleKeys=new Set((lastStatRows||[]).map(rowKey));
-  const head=["代码","名称","开始","结束","模式","周期","近期范围","综合分","累计走势","收益序列","拐点","均线","量能","DTW","复权存疑","权息状态","统计样本","算法版本","粗筛阈值","粗筛候选","DTW候选","DTW带宽","跳过原因","r5","r10","r20","r60","max60涨","max60撤"];
+  const head=["代码","名称","开始","结束","模式","周期","近期范围","综合分","累计走势","收益序列","拐点","均线","量能","幅度相似","DTW","复权存疑","权息状态","权息连续性","统计样本","算法版本","粗筛阈值","粗筛候选","DTW候选","DTW带宽","跳过原因","漏斗证券","漏斗窗口","漏斗粗筛","漏斗全局","漏斗精排","漏斗DTW","漏斗去重","漏斗展示","基准代码","绝对收益r5","绝对收益r10","绝对收益r20","绝对收益r60","基准收益r5","基准收益r10","基准收益r20","基准收益r60","超额收益r5","超额收益r10","超额收益r20","超额收益r60","max60涨","max60撤"];
   const lines=[head.join(",")];
   lastRows.forEach(r=>{
     lines.push([r.key.slice(2),(names[r.key]||"").replace(/,/g,""),r.startD,r.endD,lastMeta.mode,lastMeta.timeframe||"day",lastMeta.recentBars??"",r.score.toFixed(4),
-      r.sub.cum.toFixed(3),r.sub.ret.toFixed(3),r.sub.zig.toFixed(3),r.sub.ma.toFixed(3),r.sub.vol.toFixed(3),
-      r.sub.dtw!==undefined?r.sub.dtw.toFixed(3):"",r.warn?1:0,rightsState,statSampleKeys.has(rowKey(r))?1:0,UI_ALGO_VER,
+      r.sub.cum.toFixed(3),r.sub.ret.toFixed(3),r.sub.zig.toFixed(3),r.sub.ma.toFixed(3),r.sub.vol.toFixed(3),r.sub.amp.toFixed(3),
+      r.sub.dtw!==undefined?r.sub.dtw.toFixed(3):"",r.warn?1:0,rightsState,rightsContinuity,statSampleKeys.has(rowKey(r))?1:0,UI_ALGO_VER,
       lastMeta.settings.coarseThreshold,lastMeta.settings.K_COARSE,lastMeta.settings.K_DTW,lastMeta.settings.dtwBand,Object.entries(lastMeta.skipReasons||{}).map(([k,n])=>k+":"+n).join(";"),
-      ...[r.fut.r5,r.fut.r10,r.fut.r20,r.fut.r60,r.fut.maxUp,r.fut.maxDn].map(x=>x===null||x===undefined?"":(x*100).toFixed(2))
+      ...["stocks","windows","coarsePassed","globalKept","refined","dtw","deduped","shown"].map(k=>lastMeta.funnel?.[k]??""),
+      r.benchmarkKey||"",
+      ...[r.fut.r5,r.fut.r10,r.fut.r20,r.fut.r60,r.benchmark.r5,r.benchmark.r10,r.benchmark.r20,r.benchmark.r60,r.excess.r5,r.excess.r10,r.excess.r20,r.excess.r60,r.fut.maxUp,r.fut.maxDn].map(x=>x===null||x===undefined?"":(x*100).toFixed(2))
     ].join(","));
   });
   const blob=new Blob(["﻿"+lines.join("\r\n")],{type:"text/csv"});

@@ -20,3 +20,4 @@ desktop.ini
 # Node and Cloudflare Wrangler caches
 node_modules/
 .wrangler/
+.worktrees/
