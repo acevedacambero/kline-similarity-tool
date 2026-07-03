@@ -177,7 +177,7 @@ function cleanupLegacyEastmoneyCache(){
   const marker="kline_em_cache_cleaned_v1";
   try{if(localStorage.getItem(marker)==="1")return}catch(_){}
   try{
-    const rq=indexedDB.open("kline_tool_v2",1);
+    const rq=indexedDB.open("kline_tool_v2");
     rq.onupgradeneeded=()=>{if(!rq.result.objectStoreNames.contains("stocks"))rq.result.createObjectStore("stocks",{keyPath:"key"})};
     rq.onsuccess=()=>{
       const db=rq.result;
@@ -569,6 +569,8 @@ function onWorkerMsg(ev){
   if(m.type==="rightsStatus"){
     rightsState=m.status||"error";
     setMsg("复权",m.ok?`真实权息数据已解密，覆盖 ${m.stocks} 只证券；后续分析与匹配均使用前复权。`:`权息状态：${m.reason||"读取失败"}；将明确使用原始价格。`);
+  }else if(m.type==="cacheStatus"){
+    if(m.error)setMsg("缓存","缓存维护未完成，不影响本次结果："+m.error);
   }else if(m.type==="series"){
     const done=seriesWait.get(m.reqId);if(done){seriesWait.delete(m.reqId);done(m)}
   }else if(m.type==="progress"){

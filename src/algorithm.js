@@ -1,6 +1,6 @@
 "use strict";
 const ALGO_VER=9;
-let FILES=null, BENCHMARK_FILES=new Map(), BENCHMARKS=new Map(), RIGHTS=new Map(), RIGHTS_STATE={status:"raw",reason:"missing",count:0}, RIGHTS_STAMP="raw", cancelled=false, DB=null;
+let FILES=null, BENCHMARK_FILES=new Map(), BENCHMARKS=new Map(), RIGHTS=new Map(), RIGHTS_STATE={status:"raw",reason:"missing",count:0}, RIGHTS_STAMP="raw", cancelled=false, DB=null, CACHE_TOUCHES=new Set();
 
 function boardOfKey(key){
   const mkt=key.slice(0,2),c=key.slice(2);
@@ -304,12 +304,28 @@ function adaptiveCoarseThreshold(base,L){
   // 短窗口（周线/月线常见）重采样为32点后余弦噪声更大，按窗口长度线性放宽门槛，最多降低0.15。
   return Math.max(0.3,base-Math.min(0.15,Math.max(0,48-L)*0.005));
 }
+function estimateRecordBytes(r){
+  return (r.dates?.byteLength||0)+(r.closes?.byteLength||0)+(r.vols?.byteLength||0)+256;
+}
+function selectCacheEvictions(records,{ver,maxCount,maxBytes=Infinity,targetRatio=.9}){
+  const stale=records.filter(r=>r.ver!==ver).sort((a,b)=>(a.lastAccess||0)-(b.lastAccess||0));
+  const live=records.filter(r=>r.ver===ver).sort((a,b)=>(a.lastAccess||0)-(b.lastAccess||0));
+  const ordered=[...stale,...live],removed=[],gone=new Set();
+  let count=records.length,bytes=records.reduce((n,r)=>n+(r.bytes??estimateRecordBytes(r)),0);
+  const targetCount=Math.max(1,Math.floor(maxCount*targetRatio)),targetBytes=Number.isFinite(maxBytes)?maxBytes*targetRatio:Infinity;
+  for(const r of ordered){
+    const mustRemove=r.ver!==ver||count>targetCount||bytes>targetBytes;
+    if(!mustRemove)break;
+    removed.push(r.key);gone.add(r.key);count--;bytes-=r.bytes??estimateRecordBytes(r);
+  }
+  return removed;
+}
 
 
 function idbOpen(){
   return new Promise((res,rej)=>{
-    const rq=indexedDB.open("kline_tool_v2",1);
-    rq.onupgradeneeded=()=>rq.result.createObjectStore("stocks",{keyPath:"key"});
+    const rq=indexedDB.open("kline_tool_v2",2);
+    rq.onupgradeneeded=()=>{if(!rq.result.objectStoreNames.contains("stocks"))rq.result.createObjectStore("stocks",{keyPath:"key"});if(!rq.result.objectStoreNames.contains("meta"))rq.result.createObjectStore("meta",{keyPath:"key"})};
     rq.onsuccess=()=>res(rq.result);
     rq.onerror=()=>rej(rq.error);
   });
@@ -331,6 +347,21 @@ function idbPutBatch(db,recs){
     }catch(_){res(false)}
   });
 }
+function idbAll(db){return new Promise(res=>{try{const rq=db.transaction("stocks","readonly").objectStore("stocks").getAll();rq.onsuccess=()=>res(rq.result||[]);rq.onerror=()=>res([])}catch(_){res([])}})}
+function idbDeleteBatch(db,keys){return new Promise(res=>{try{const tx=db.transaction("stocks","readwrite"),st=tx.objectStore("stocks");for(const k of keys)st.delete(k);tx.oncomplete=()=>res(true);tx.onerror=tx.onabort=()=>res(false)}catch(_){res(false)}})}
+async function maintainCache(db){
+  if(!db)return {removed:0,count:0,quotaKnown:false};
+  const records=await idbAll(db),now=Date.now();
+  for(const r of records){if(CACHE_TOUCHES.has(r.key))r.lastAccess=now;r.bytes=r.bytes??estimateRecordBytes(r)}
+  CACHE_TOUCHES.clear();
+  let quota=null;
+  try{const est=typeof navigator!=="undefined"&&navigator.storage?.estimate?await navigator.storage.estimate():null;quota=Number.isFinite(est?.quota)?est.quota:null}catch(_){}
+  const maxBytes=quota===null?Infinity:quota * .2;
+  const keys=selectCacheEvictions(records,{ver:ALGO_VER,maxCount:7000,maxBytes,targetRatio:.9});
+  if(keys.length)await idbDeleteBatch(db,keys);
+  const survivors=records.filter(r=>!keys.includes(r.key));if(survivors.length)await idbPutBatch(db,survivors);
+  return {removed:keys.length,count:survivors.length,quotaKnown:quota!==null,maxBytes:Number.isFinite(maxBytes)?maxBytes:null};
+}
 
 async function getStock(key,pending){
   const f0=FILES.get(key);
@@ -338,11 +369,12 @@ async function getStock(key,pending){
   const file=f0.getFile?await f0.getFile():f0;
   const hit=DB?await idbGet(DB,key):null;
   if(isCacheValid(hit,file,RIGHTS_STAMP,ALGO_VER)){
+    CACHE_TOUCHES.add(key);
     return {dates:new Int32Array(hit.dates),closes:new Float64Array(hit.closes),vols:new Float64Array(hit.vols),warn:hit.warn,qStatus:hit.qStatus,qEvents:hit.qEvents,lastD:hit.lastD};
   }
   const buf=await file.arrayBuffer();
   const p=parseDayQfq(buf,key);
-  pending.push({key,ver:ALGO_VER,rv:RIGHTS_STAMP,size:file.size,mtime:file.lastModified,dates:p.dates.buffer,closes:p.closes.buffer,vols:p.vols.buffer,warn:p.warn,qStatus:p.qStatus,qEvents:p.qEvents,lastD:p.lastD});
+  const rec={key,ver:ALGO_VER,rv:RIGHTS_STAMP,size:file.size,mtime:file.lastModified,dates:p.dates.buffer,closes:p.closes.buffer,vols:p.vols.buffer,warn:p.warn,qStatus:p.qStatus,qEvents:p.qEvents,lastD:p.lastD,lastAccess:Date.now()};rec.bytes=estimateRecordBytes(rec);pending.push(rec);
   return p;
 }
 
@@ -627,6 +659,7 @@ async function runMatch(cfg){
     const clusters=clusterHorizonValues(statRows,hk,7,family).sort((a,b)=>a-b);
     statSummary[hk]={...maturity,family,periodN:clusters.length,win:clusters.length?clusters.filter(x=>x>0).length/clusters.length:null,interval:bootstrapWinInterval(clusters),median:medianOf(clusters)};
   }
+  try{const cache=await maintainCache(DB);post({type:"cacheStatus",...cache})}catch(err){post({type:"cacheStatus",error:String(err)})}
   post({type:"result",rows,statRows,meta:{mode,timeframe,recentBars:effectiveRecentBars,scanned:total,skipped,skipReasons,skipDetails,settings:{preset:cfg.preset||"custom",coarseThreshold,coarseThresholdEffective,K_COARSE,K_DTW,dtwBand},statSummary,L,refStartD,refEndD,elapsed:((Date.now()-t0)/1000).toFixed(1),
     refWarn:refStk.warn,candidates:coarse.length,refNn:Array.from(resample(refStk.closes.subarray(rs,re+1),120)).map(x=>x/refStk.closes[rs])}});
 }
@@ -665,4 +698,4 @@ function packStk(stk,s,e,benchmarkSeries=null){
   return {startD:stk.dates[s],endD:stk.dates[e],win,nnSmall,fut,benchmark,excess,lagBars,futNn:futNn.length>1?Array.from(resample(new Float64Array(futNn),Math.min(60,futNn.length))):[],lastD:stk.lastD};
 }
 self.__KLINE_TEST_API__={version:ALGO_VER,parseDayBuffer,resolveRightsState,corporateActionFactor,applyCorporateActions,
-  aggregateSeries,periodKey,zscore,cosine,dtwDist,zigAmps,alignCommonDates,sliceSeriesByDate,dedupeOverlaps,mergePerStockCandidates,historicalMaxEnd,recentWindowStarts,recentFreshnessCutoff,clusterHorizonValues,bootstrapWinInterval,isCacheValid,adaptiveCoarseThreshold,boardOfKey,benchmarkKeyFor,indexOnOrBefore,benchmarkReturn,excessReturn,medianOf,summarizeHorizon,ratioSimilarity,amplitudeSimilarity};
+  aggregateSeries,periodKey,zscore,cosine,dtwDist,zigAmps,alignCommonDates,sliceSeriesByDate,dedupeOverlaps,mergePerStockCandidates,historicalMaxEnd,recentWindowStarts,recentFreshnessCutoff,clusterHorizonValues,bootstrapWinInterval,isCacheValid,adaptiveCoarseThreshold,boardOfKey,benchmarkKeyFor,indexOnOrBefore,benchmarkReturn,excessReturn,medianOf,summarizeHorizon,ratioSimilarity,amplitudeSimilarity,estimateRecordBytes,selectCacheEvictions};

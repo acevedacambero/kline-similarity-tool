@@ -58,6 +58,14 @@ test('amplitude similarity has a default weight of ten', () => {
   assert.match(html,/amp:\+\$\("wAmp"\)\.value/);
 });
 
+test('cache maintenance uses the approved count and quota limits', () => {
+  const html=fs.readFileSync(HTML_PATH,'utf8');
+  assert.match(html,/maxCount:7000/);
+  assert.match(html,/quota\s*\*\s*\.2/);
+  assert.match(html,/targetRatio:\.9/);
+  assert.ok(html.includes('cacheStatus'));
+});
+
 test('result protocol contains effective statistical samples', () => {
   const html = fs.readFileSync(HTML_PATH, 'utf8');
   assert.match(html, /statRows/);

@@ -137,6 +137,17 @@ test('amplitude similarity is symmetric and neutral for invalid scales', () => {
   assert.equal(api.amplitudeSimilarity({sd:.02,range:.10},{sd:.02,range:.10}),1);
 });
 
+test('cache eviction removes stale versions then least-recently-used records', () => {
+  const { api } = loadWorker(HTML);
+  const records=[
+    {key:'a',ver:8,lastAccess:9,bytes:10},
+    {key:'b',ver:10,lastAccess:1,bytes:10},
+    {key:'c',ver:10,lastAccess:2,bytes:10}
+  ];
+  assert.deepEqual(Array.from(api.selectCacheEvictions(records,{ver:10,maxCount:3,maxBytes:25,targetRatio:.9})),['a']);
+  assert.deepEqual(Array.from(api.selectCacheEvictions(records.slice(1),{ver:10,maxCount:1,maxBytes:25,targetRatio:.9})),['b']);
+});
+
 test('similarity primitives are stable on edge cases', () => {
   const { api } = loadWorker(HTML);
   assert.deepEqual(Array.from(api.zscore([3, 3, 3])), [0, 0, 0]);
