@@ -81,6 +81,19 @@ test('placebo baseline is shown with its fixed round count', () => {
   assert.ok(html.includes('随机基线（200轮）'));
 });
 
+test('placebo collection stays lightweight and sampling uses partial shuffle', () => {
+  const html=fs.readFileSync(HTML_PATH,'utf8');
+  assert.doesNotMatch(html,/addPlacebos=.*packStk/);
+  assert.match(html,/for\(let i=0;i<k;i\+\+\)/);
+});
+
+test('benchmark status explicitly reports missing local indexes', () => {
+  const html=fs.readFileSync(HTML_PATH,'utf8');
+  assert.ok(html.includes('missingBenchmarkKeys'));
+  assert.ok(html.includes('缺少本地指数'));
+  assert.ok(html.includes('展示绝对收益'));
+});
+
 test('result protocol contains effective statistical samples', () => {
   const html = fs.readFileSync(HTML_PATH, 'utf8');
   assert.match(html, /statRows/);

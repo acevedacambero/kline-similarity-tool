@@ -190,6 +190,30 @@ test('matched placebo summary is reproducible for a fixed seed', () => {
   assert.deepEqual(JSON.parse(JSON.stringify(api.placeboSummary(matches,pool,'r5',200,20260703))),JSON.parse(JSON.stringify(api.placeboSummary(matches,pool,'r5',200,20260703))));
 });
 
+test('forward returns computes stock benchmark excess and lag without display arrays', () => {
+  const { api } = loadWorker(HTML);
+  const stk={dates:Int32Array.from(Array.from({length:70},(_,i)=>20260101+i)),closes:Float64Array.from(Array.from({length:70},(_,i)=>100+i))};
+  const benchmark={dates:stk.dates,closes:Float64Array.from(Array.from({length:70},(_,i)=>200+i))};
+  const out=api.forwardReturns(stk,0,benchmark);
+  assert.ok(Math.abs(out.fut.r5-.05)<1e-12);
+  assert.ok(Math.abs(out.benchmark.r5-.025)<1e-12);
+  assert.ok(Math.abs(out.excess.r5-(1.05/1.025-1))<1e-12);
+  assert.equal(out.lagBars.r5,69);
+  assert.equal('win' in out,false);
+});
+
+test('cache write-back keeps only touched records that survive eviction', () => {
+  const { api } = loadWorker(HTML);
+  const records=[{key:'a'},{key:'b'},{key:'c'}];
+  assert.deepEqual(Array.from(api.cacheWriteBackKeys(records,new Set(['a','b']),new Set(['b']))),['a']);
+});
+
+test('return family falls back to absolute returns when excess is unavailable', () => {
+  const { api } = loadWorker(HTML);
+  assert.equal(api.selectReturnFamily([{fut:{r5:.1},excess:{r5:null}}],'r5'),'fut');
+  assert.equal(api.selectReturnFamily([{fut:{r5:.1},excess:{r5:.03}}],'r5'),'excess');
+});
+
 test('similarity primitives are stable on edge cases', () => {
   const { api } = loadWorker(HTML);
   assert.deepEqual(Array.from(api.zscore([3, 3, 3])), [0, 0, 0]);
