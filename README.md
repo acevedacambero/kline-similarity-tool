@@ -29,7 +29,7 @@
 
 ## 隐私
 
-页面不包含 `fetch`、`XMLHttpRequest` 或 WebSocket 网络请求。通达信数据只在本机浏览器中处理。仓库不包含任何行情、权息、账户或通达信配置文件。
+页面不包含 `fetch`、`XMLHttpRequest` 或 WebSocket 网络请求。通达信与东方财富数据都只在本机浏览器中处理。仓库不包含任何行情、权息、账户或客户端配置文件。
 
 ## 测试
 
@@ -53,7 +53,7 @@ npm run dev
 npm run deploy
 ```
 
-也可以在 Cloudflare Dashboard 中连接此 GitHub 仓库，构建命令留空，部署命令使用 `npx wrangler deploy`。自定义域名应在新的 `workers.dev` 预览地址验证通过后再绑定。
+也可以在 Cloudflare Dashboard 中连接此 GitHub 仓库，构建命令使用 `npm run build:cf`，部署命令使用 `npx wrangler deploy`。该构建命令会先运行回归测试与本地数据隐私策略检查，再生成带提交短哈希的发布文件。自定义域名应在新的 `workers.dev` 预览地址验证通过后再绑定。
 
 ## 风险说明
 

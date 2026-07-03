@@ -195,3 +195,22 @@ test('Eastmoney local data source is selectable and wired end to end', () => {
   assert.match(html, /source:"em"/);
   assert.match(html, /emApplyFactors\(/);
 });
+
+test('Eastmoney first-load pipeline bounds peak memory and releases the full store', () => {
+  const html = fs.readFileSync(HTML_PATH, 'utf8');
+  const instrument = html.indexOf('for(const f of EM_FILES.instrument)');
+  const dayBar = html.indexOf('for(const f of EM_FILES.dayBar)');
+  assert.ok(instrument >= 0 && dayBar > instrument, 'instrument factors should be scanned before day bars');
+  assert.match(html, /parseEmNames\(\[new Uint8Array\(await emFileBuf\(f\)\)\]\)/);
+  assert.match(html, /acc\.delete\(key\);fac\.delete\(key\);stLatest\.delete\(key\)/);
+  assert.match(html, /if\(cacheOK\)EM_STORE=null/);
+  assert.match(html, /tx\.oncomplete=\(\)=>res\(true\)/);
+});
+
+test('Cloudflare build runs tests and the shared policy gate', () => {
+  const root = path.resolve(__dirname, '..');
+  const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
+  assert.match(pkg.scripts['build:cf'], /npm test/);
+  assert.match(pkg.scripts['build:cf'], /policy-check\.cjs --require-stamp/);
+  assert.equal(fs.existsSync(path.join(root, 'scripts', 'policy-check.cjs')), true);
+});

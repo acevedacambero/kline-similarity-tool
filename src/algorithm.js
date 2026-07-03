@@ -398,23 +398,10 @@ function emSortSeries(a){
 }
 async function emFileBuf(f){const file=f.getFile?await f.getFile():f;return file.arrayBuffer()}
 async function buildEmStore(post){
-  const acc=new Map();
   const prog=(ph,i,n)=>{if(post)post({type:"progress",phase:ph,done:i,total:n,rate:"",eta:""})};
-  let fi=0;
-  for(const f of EM_FILES.dayBar){
-    prog("解析东财日线库",fi++,EM_FILES.dayBar.length);
-    const buf=await emFileBuf(f);
-    sqliteScanTable(buf,"dists_day_bar",9,v=>{
-      const key=emSymKey(v[0]);if(!key)return;
-      const c=v[6]??v[9];
-      if(!Number.isFinite(c)||c<=0)return;
-      let a=acc.get(key);if(!a){a={d:[],o:[],h:[],l:[],c:[],am:[],v:[]};acc.set(key,a)}
-      a.d.push(emDateInt(v[1]));a.o.push(v[3]||c);a.h.push(v[4]||c);a.l.push(v[5]||c);a.c.push(c);a.v.push(v[7]||0);a.am.push(v[8]||0);
-    });
-    await new Promise(r=>setTimeout(r));
-  }
+  // 权息变更点远小于日线明细，先解析它，避免持有全量日线数组时再读取数百 MB instrument 文件。
   const fac=new Map(),stLatest=new Map();
-  fi=0;
+  let fi=0;
   for(const f of EM_FILES.instrument){
     prog("解析东财权息库",fi++,EM_FILES.instrument.length);
     const buf=await emFileBuf(f);
@@ -444,13 +431,29 @@ async function buildEmStore(post){
     }
     g.d=dd;g.f=ffv;
   }
-  let nameBufs=[];
-  for(const f of EM_FILES.names){try{nameBufs.push(new Uint8Array(await emFileBuf(f)))}catch(_){}}
-  prog("解析东财名称",0,1);
-  const names=parseEmNames(nameBufs);
-  nameBufs=null;
+
+  const acc=new Map();fi=0;
+  for(const f of EM_FILES.dayBar){
+    prog("解析东财日线库",fi++,EM_FILES.dayBar.length);
+    const buf=await emFileBuf(f);
+    sqliteScanTable(buf,"dists_day_bar",9,v=>{
+      const key=emSymKey(v[0]);if(!key)return;
+      const c=v[6]??v[9];
+      if(!Number.isFinite(c)||c<=0)return;
+      let a=acc.get(key);if(!a){a={d:[],o:[],h:[],l:[],c:[],am:[],v:[]};acc.set(key,a)}
+      a.d.push(emDateInt(v[1]));a.o.push(v[3]||c);a.h.push(v[4]||c);a.l.push(v[5]||c);a.c.push(c);a.v.push(v[7]||0);a.am.push(v[8]||0);
+    });
+    await new Promise(r=>setTimeout(r));
+  }
+
+  // 名称分片逐个读取和释放，避免把所有 StkQuoteList 文件同时留在内存。
+  const names={};fi=0;
+  for(const f of EM_FILES.names){
+    prog("解析东财名称",fi++,EM_FILES.names.length);
+    try{const part=parseEmNames([new Uint8Array(await emFileBuf(f))]);for(const[code,name]of Object.entries(part))if(names[code]===undefined)names[code]=name}catch(_){}
+  }
   EM_STORE=new Map();
-  const keys=[],stKeys=[],pend=[];
+  const keys=[],stKeys=[],pend=[];let cacheOK=!!DB,converted=0;
   for(const[key,a0]of acc){
     const a=emSortSeries(a0);
     const rec={dates:Int32Array.from(a.d),opens:Float64Array.from(a.o),highs:Float64Array.from(a.h),lows:Float64Array.from(a.l),
@@ -464,15 +467,20 @@ async function buildEmStore(post){
     if(DB){
       pend.push({key:"em:"+key,ver:ALGO_VER,rv:EM_STAMP,dates:rec.dates.buffer,opens:rec.opens.buffer,highs:rec.highs.buffer,lows:rec.lows.buffer,
         closes:rec.closes.buffer,amounts:rec.amounts.buffer,vols:rec.vols.buffer,warn:rec.warn,qStatus:rec.qStatus,qEvents:rec.qEvents,lastD:rec.lastD});
-      if(pend.length>=100)await idbPutBatch(DB,pend.splice(0));
+      if(pend.length>=100&&!await idbPutBatch(DB,pend.splice(0)))cacheOK=false;
     }
+    // 删除已转换的稀疏 JS 数组和辅助记录，使峰值随转换推进而下降。
+    acc.delete(key);fac.delete(key);stLatest.delete(key);
+    if(++converted%200===0)await new Promise(r=>setTimeout(r));
   }
   keys.sort();
   EM_META={keys,stKeys,names};
   if(DB){
     pend.push({key:"em:__meta__",ver:ALGO_VER,rv:EM_STAMP,keys,stKeys,names});
-    await idbPutBatch(DB,pend.splice(0));
+    if(!await idbPutBatch(DB,pend.splice(0)))cacheOK=false;
   }
+  // 缓存可靠落盘后按需从 IndexedDB 读取，避免首次解析后长期保留全市场 TypedArray。
+  if(cacheOK)EM_STORE=null;
 }
 async function ensureEmMeta(post){
   if(EM_META)return;
@@ -514,8 +522,8 @@ function idbPutBatch(db,recs){
     try{
       const tx=db.transaction("stocks","readwrite"),st=tx.objectStore("stocks");
       for(const r of recs)st.put(r);
-      tx.oncomplete=()=>res();tx.onerror=()=>res();
-    }catch(_){res()}
+      tx.oncomplete=()=>res(true);tx.onerror=()=>res(false);tx.onabort=()=>res(false);
+    }catch(_){res(false)}
   });
 }
 
