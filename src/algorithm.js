@@ -265,6 +265,10 @@ function bootstrapWinInterval(values,iterations=1000,seed=20260703){
   samples.sort((a,b)=>a-b);return [samples[Math.floor(iterations*.025)],samples[Math.min(iterations-1,Math.floor(iterations*.975))]];
 }
 function isCacheValid(hit,file,rv,ver=ALGO_VER){return !!hit&&hit.ver===ver&&hit.rv===rv&&hit.size===file.size&&hit.mtime===file.lastModified}
+function adaptiveCoarseThreshold(base,L){
+  // 短窗口（周线/月线常见）重采样为32点后余弦噪声更大，按窗口长度线性放宽门槛，最多降低0.15。
+  return Math.max(0.3,base-Math.min(0.15,Math.max(0,48-L)*0.005));
+}
 
 function idbOpen(){
   return new Promise((res,rej)=>{
@@ -292,11 +296,11 @@ function idbPutBatch(db,recs){
   });
 }
 
-async function getStock(key,cache,pending){
+async function getStock(key,pending){
   const f0=FILES.get(key);
   if(!f0)return null;
   const file=f0.getFile?await f0.getFile():f0;
-  const hit=cache.get(key)||(DB?await idbGet(DB,key):null);
+  const hit=DB?await idbGet(DB,key):null;
   if(isCacheValid(hit,file,RIGHTS_STAMP,ALGO_VER)){
     return {dates:new Int32Array(hit.dates),closes:new Float64Array(hit.closes),vols:new Float64Array(hit.vols),warn:hit.warn,qStatus:hit.qStatus,qEvents:hit.qEvents,lastD:hit.lastD};
   }
@@ -356,13 +360,12 @@ self.onmessage=async ev=>{
 async function runMatch(cfg){
   if(!DB){try{DB=await idbOpen()}catch(_){DB=null}}
   // 缓存按证券惰性读取，避免把全市场历史数组一次性反序列化进内存。
-  const cache=new Map();
   const pending=[];
   const post=o=>postMessage(o);
 
   const refKey=cfg.refKey;
   const timeframe=normalizeTimeframe(cfg.timeframe);
-  const refDaily=await getStock(refKey,cache,pending);
+  const refDaily=await getStock(refKey,pending);
   if(!refDaily){post({type:"error",msg:"未找到参考股票数据"});return}
   const refStk=aggregateSeries(refDaily,timeframe,cfg.d2);
   refStk.ma20=ma20Arr(refStk.closes);
@@ -393,6 +396,7 @@ async function runMatch(cfg){
   }
   const refStartD=refStk.dates[rs],refEndD=refStk.dates[re];
 
+  const stSet=new Set(cfg.exST?cfg.stKeys||[]:[]);
   const keys=[];
   for(const k of FILES.keys()){
     const mkt=k.slice(0,2),c=k.slice(2);
@@ -404,12 +408,13 @@ async function runMatch(cfg){
     else if(mkt==="sh"&&/^(51|56|58)/.test(c)||mkt==="sz"&&/^(15|16)/.test(c))board="etf";
     if(!board)continue;
     if(!cfg.boards[board])continue;
-    if(cfg.exST&&cfg.stKeys.includes(k))continue;
+    if(cfg.exST&&stSet.has(k))continue;
     keys.push(k);
   }
 
   const t0=Date.now();
   const coarseThreshold=Math.min(0.95,Math.max(0.3,Number(cfg.coarseThreshold)||0.75));
+  const coarseThresholdEffective=adaptiveCoarseThreshold(coarseThreshold,L);
   const K_COARSE=Math.min(2000,Math.max(50,Math.floor(cfg.coarseLimit)||600));
   const K_DTW=Math.min(K_COARSE,Math.max(20,Math.floor(cfg.dtwLimit)||200));
   const dtwBand=Math.min(24,Math.max(1,Math.floor(cfg.dtwBand)||6));
@@ -423,16 +428,23 @@ async function runMatch(cfg){
   const skip=(reason,key,err)=>{skipped++;skipReasons[reason]=(skipReasons[reason]||0)+1;if(err&&skipDetails.length<8)skipDetails.push({key,reason,error:String(err&&err.message||err)})};
   const total=keys.length;
 
-  for(const key of keys){
+  // 4路并发预取：读文件/读缓存与计算重叠，缩短首次全市场扫描耗时。
+  const PREFETCH=4,inflight=new Map();
+  const prefetch=i=>{for(let j=i;j<Math.min(total,i+PREFETCH);j++){const k2=keys[j];if(!inflight.has(k2))inflight.set(k2,getStock(k2,pending).catch(err=>({__loadError:err})))}};
+
+  for(let ki=0;ki<total;ki++){
+    const key=keys[ki];
     if(cancelled){post({type:"cancelled"});return}
     done++;
+    prefetch(ki);
     if(done%40===0){
       const el=(Date.now()-t0)/1000,rate=done/el;
       post({type:"progress",done,total,rate:rate.toFixed(0),eta:Math.max(0,(total-done)/rate).toFixed(0),phase:"粗筛"});
       await new Promise(r=>setTimeout(r));
     }
     try{
-      const daily=await getStock(key,cache,pending);
+      const daily=await inflight.get(key);inflight.delete(key);
+      if(daily&&daily.__loadError)throw daily.__loadError;
       if(!daily){skip("无数据",key);continue}
       const stk=aggregateSeries(daily,timeframe);
       const n=stk.dates.length;
@@ -463,7 +475,7 @@ async function runMatch(cfg){
         peerRef.zma=zscore(rma);peerRef.zvol=zscore(rvol);
         const sub=subScores(peerStk,0,peerStk.closes.length-1,peerRef,cfg.zzth);
         sub.cum=cum;sub.ret=ret;
-        coarse.push({key,s,e,sub,warn:stk.warn,stk:packStk(stk,s,e)});
+        coarse.push({key,s,e,sub,warn:stk.warn,stk:packStk(stk,s,e),coarse:0.5*cum+0.5*ret});
       }else{
         const minLen=mode==="recent"?L:L+5;
         if(n<minLen){skip("窗口数据不足",key);continue}
@@ -496,16 +508,14 @@ async function runMatch(cfg){
           let dot=0;
           for(let q=0;q<32;q++)dot+=((scratch[q]-m)/sd)*R.z32[q];
           const cs=dot/32;
-          if(cs>coarseThreshold)bestOfStock.push([cs,s]);
+          if(cs>coarseThresholdEffective)bestOfStock.push([cs,s]);
         }
         if(!bestOfStock.length){skip("形态粗筛未通过",key);continue}
         bestOfStock.sort((a,b)=>b[0]-a[0]);
         bestOfStock=bestOfStock.slice(0,10);
-        if(!stk.ma20)stk.ma20=ma20Arr(stk.closes);
         for(const[cs,s]of bestOfStock){
-          const e=s+L-1;
-          const sub=subScores(stk,s,e,R,cfg.zzth);
-          coarse.push({key,s,e,sub,warn:stk.warn,stk:packStk(stk,s,e),coarse:cs});
+          // 粗筛只保留轻量候选（key+窗口+粗分），完整子分与展示数据延迟到全局裁剪之后计算，显著降低内存峰值。
+          coarse.push({key,s,e:s+L-1,coarse:cs,warn:stk.warn});
         }
       }
     }catch(err){skip("计算异常",key,err)}
@@ -515,6 +525,28 @@ async function runMatch(cfg){
   coarse.length=0;coarse.push(...diversified);
 
   post({type:"progress",done:total,total,phase:"精排",rate:"",eta:""});
+  // 精排：仅对全局裁剪后的候选（≤K_COARSE）按证券重新读取解析缓存，计算完整子分与展示数据。
+  {
+    const byKey=new Map();
+    for(const c of coarse){if(!c.sub||!c.stk){if(!byKey.has(c.key))byKey.set(c.key,[]);byKey.get(c.key).push(c)}}
+    let rdone=0;
+    for(const[key,cands]of byKey){
+      if(cancelled){post({type:"cancelled"});return}
+      let stk=null;
+      try{
+        const daily=await getStock(key,pending);
+        if(daily){stk=aggregateSeries(daily,timeframe);stk.ma20=ma20Arr(stk.closes)}
+      }catch(_){}
+      for(const c of cands){
+        if(stk&&c.e<stk.dates.length){c.sub=subScores(stk,c.s,c.e,R,cfg.zzth);c.stk=packStk(stk,c.s,c.e)}
+        else c.drop=true;
+      }
+      if(++rdone%40===0)await new Promise(r=>setTimeout(r));
+    }
+    if(pending.length&&DB)await idbPutBatch(DB,pending.splice(0));
+    const finalists=coarse.filter(c=>!c.drop&&c.sub&&c.stk);
+    coarse.length=0;coarse.push(...finalists);
+  }
   const W=cfg.weights,wsum=W.ret+W.cum+W.zig+W.ma+W.vol+W.vdd||1;
   for(const c of coarse){
     const s=c.sub;
@@ -552,7 +584,7 @@ async function runMatch(cfg){
   };
   const rows=kept.map(toRow),statRows=dedupeOverlaps(kept,0.7,L).map(toRow),statSummary={};
   for(const hk of["r5","r10","r20","r60"]){const raw=statRows.map(r=>r.fut[hk]).filter(Number.isFinite),clusters=clusterHorizonValues(statRows,hk,7).sort((a,b)=>a-b);statSummary[hk]={rawN:raw.length,periodN:clusters.length,win:clusters.length?clusters.filter(x=>x>0).length/clusters.length:null,interval:bootstrapWinInterval(clusters),median:clusters.length?clusters[Math.floor(clusters.length/2)]:null}}
-  post({type:"result",rows,statRows,meta:{mode,timeframe,recentBars:effectiveRecentBars,scanned:total,skipped,skipReasons,skipDetails,settings:{preset:cfg.preset||"custom",coarseThreshold,K_COARSE,K_DTW,dtwBand},statSummary,L,refStartD,refEndD,elapsed:((Date.now()-t0)/1000).toFixed(1),
+  post({type:"result",rows,statRows,meta:{mode,timeframe,recentBars:effectiveRecentBars,scanned:total,skipped,skipReasons,skipDetails,settings:{preset:cfg.preset||"custom",coarseThreshold,coarseThresholdEffective,K_COARSE,K_DTW,dtwBand},statSummary,L,refStartD,refEndD,elapsed:((Date.now()-t0)/1000).toFixed(1),
     refWarn:refStk.warn,candidates:coarse.length,refNn:Array.from(resample(refStk.closes.subarray(rs,re+1),120)).map(x=>x/refStk.closes[rs])}});
 }
 
@@ -561,14 +593,6 @@ function lastIdxBefore(dates,d){
   while(lo<=hi){const m=(lo+hi)>>1;if(dates[m]<d){ans=m+1;lo=m+1}else hi=m-1}
   return ans;
 }
-function pushCand(arr,c,K){
-  arr.push(c);
-  if(arr.length>K*1.5){
-    arr.sort((a,b)=>(b.coarse||scoreOf(b))-(a.coarse||scoreOf(a)));
-    arr.length=K;
-  }
-}
-function scoreOf(c){const s=c.sub;return (s.ret+s.cum)/2}
 function packStk(stk,s,e){
   const L=e-s+1,c0=stk.closes[s];
   const win=Array.from(stk.closes.subarray(s,e+1));
@@ -592,4 +616,4 @@ function packStk(stk,s,e){
   return {startD:stk.dates[s],endD:stk.dates[e],win,nnSmall,fut,futNn:futNn.length>1?Array.from(resample(new Float64Array(futNn),Math.min(60,futNn.length))):[],lastD:stk.lastD};
 }
 self.__KLINE_TEST_API__={version:ALGO_VER,parseDayBuffer,resolveRightsState,corporateActionFactor,applyCorporateActions,
-  aggregateSeries,periodKey,zscore,cosine,dtwDist,zigAmps,alignCommonDates,sliceSeriesByDate,dedupeOverlaps,mergePerStockCandidates,historicalMaxEnd,recentWindowStarts,recentFreshnessCutoff,wilsonInterval,clusterHorizonValues,bootstrapWinInterval,isCacheValid};
+  aggregateSeries,periodKey,zscore,cosine,dtwDist,zigAmps,alignCommonDates,sliceSeriesByDate,dedupeOverlaps,mergePerStockCandidates,historicalMaxEnd,recentWindowStarts,recentFreshnessCutoff,wilsonInterval,clusterHorizonValues,bootstrapWinInterval,isCacheValid,adaptiveCoarseThreshold};

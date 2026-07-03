@@ -55,7 +55,7 @@ details summary{cursor:pointer;font-size:13px;color:#2a78d6;margin-top:8px}
 </head>
 <body>
 <h1>K线结构相似度分析工具 <span style="font-size:12px;color:#999">v2</span></h1>
-<p class="sub">通达信本地数据 · 结构/均线/量价分析 · 同期联动 + 历史滑窗形态搜索 · 数据仅在本机读取，不会上传</p>
+<p class="sub">通达信本地数据 · 结构/均线/量价分析 · 同期联动 + 历史滑窗形态搜索 · 数据仅在本机读取，不会上传 <span id="buildInfo" style="color:#bbb">__KLINE_BUILD_META__</span></p>
 
 <div class="panel">
   <div class="controls">
@@ -129,7 +129,7 @@ details summary{cursor:pointer;font-size:13px;color:#2a78d6;margin-top:8px}
     <div><h2>均线支撑统计</h2><div class="tblwrap"><table id="maTable"></table></div><p class="hint">回踩守住＝当日最低触及均线2%以内且收盘守住；有效跌破＝收盘低于均线2%以上。</p></div>
     <div><h2>波段结构（收盘价 ZigZag）</h2><div class="tblwrap"><table id="swTable"></table></div></div>
   </div>
-  <h2>月度量价</h2><div class="tblwrap"><table id="moTable"></table></div>
+  <div id="moBox"><h2>月度量价</h2><div class="tblwrap"><table id="moTable"></table></div></div>
   <div class="stats" id="vpStats"></div>
 </div>
 
@@ -247,10 +247,13 @@ async function finishLoad(tnf){
   }
 }
 
+let workerUrl=null;
 async function initWorker(){
   if(worker)worker.terminate();
+  if(workerUrl){URL.revokeObjectURL(workerUrl);workerUrl=null}
   const src=$("workerSrc").textContent;
-  worker=new Worker(URL.createObjectURL(new Blob([src],{type:"application/javascript"})));
+  workerUrl=URL.createObjectURL(new Blob([src],{type:"application/javascript"}));
+  worker=new Worker(workerUrl);
   worker.onmessage=onWorkerMsg;
   worker.onerror=e=>{setMsg("匹配","Worker错误："+e.message);matchDone()}
   let gbbq=null,rightsStamp="raw";
@@ -274,6 +277,26 @@ function lastIndexOnOrBefore(dates,target){
   let lo=0,hi=dates.length-1,ans=-1;while(lo<=hi){const m=(lo+hi)>>1;if(dates[m]<=target){ans=m;lo=m+1}else hi=m-1}return ans;
 }
 
+const PREF_KEY="kline_prefs_v1";
+const PREF_IDS=["timeframe","zz","step","recentBars","perStock","topN","isolate","fMain","fCyb","fKcb","fBj","fEtf","fSt","fNew","wRet","wCum","wZig","wMa","wVol","wVdd","wDtw","matchPreset","coarseTh","coarseLimit","dtwLimit","dtwBand"];
+function savePrefs(){
+  try{
+    const o={};
+    for(const id of PREF_IDS){const el=$(id);if(!el)continue;o[id]=el.type==="checkbox"?el.checked:el.value}
+    o.mode=document.querySelector('input[name=mode]:checked').value;
+    localStorage.setItem(PREF_KEY,JSON.stringify(o));
+  }catch(_){}
+}
+function loadPrefs(){
+  try{
+    const o=JSON.parse(localStorage.getItem(PREF_KEY)||"null");if(!o)return;
+    for(const id of PREF_IDS){const el=$(id);if(!el||!(id in o))continue;if(el.type==="checkbox")el.checked=!!o[id];else el.value=o[id]}
+    if(o.mode){const r=document.querySelector(`input[name=mode][value="${o.mode}"]`);if(r)r.checked=true}
+  }catch(_){}
+}
+loadPrefs();
+document.addEventListener("change",e=>{const t=e.target;if(t&&(PREF_IDS.includes(t.id)||t.name==="mode"))savePrefs()});
+
 let savedIsolate=$("isolate").checked;
 function syncModeControls(){
   const mode=document.querySelector('input[name=mode]:checked').value,isHist=mode==="hist",isRecent=mode==="recent";
@@ -291,6 +314,7 @@ function syncTimeframe(){
   setMsg("周期",`已切换为${TF_LABEL[tf]}，请重新分析目标股票。`);
 }
 $("timeframe").addEventListener("change",syncTimeframe);
+if($("timeframe").value!=="day"){const u=TF_UNIT[$("timeframe").value];$("quickBtns").querySelectorAll("button[data-n]").forEach(b=>b.textContent=b.dataset.n+u)}
 const MATCH_PRESETS={stable:{coarseTh:.82,coarseLimit:400,dtwLimit:120,dtwBand:5},balanced:{coarseTh:.75,coarseLimit:600,dtwLimit:200,dtwBand:6},loose:{coarseTh:.65,coarseLimit:900,dtwLimit:300,dtwBand:8}};
 $("matchPreset").addEventListener("change",()=>{const p=MATCH_PRESETS[$("matchPreset").value];for(const[k,v]of Object.entries(p))$(k).value=v});
 
@@ -384,6 +408,7 @@ async function analyze(code){
     tr.lastChild.className=g>=0?"up":"dn";
   }
 
+  $("moBox").style.display=timeframe==="month"?"none":"";
   const moT=$("moTable");moT.textContent="";
   addRow(moT,["月份","开","高","低","收","涨跌","成交量(万手)","成交额(亿)"],true);
   const months={};bars.forEach(b=>{(months[Math.floor(b.d/100)]=months[Math.floor(b.d/100)]||[]).push(b)});
@@ -541,7 +566,7 @@ function renderResults(){
   $("matchTitle").textContent=`匹配结果 · ${TF_LABEL[timeframe]} · ${modeTxt} · 窗口${meta.L}个${unit}线周期${meta.mode==="recent"?` · 近期范围${meta.recentBars}个周期`:""} · 扫描${meta.scanned}只 · 跳过${meta.skipped||0}只 · 耗时${meta.elapsed}秒`+(meta.refWarn?" · ⚠未复权":" · 真实权息前复权");
   if(!rows.length){
     $("btStats").textContent="";$("matchTable").querySelector("tbody").textContent="";
-    $("btNote").textContent=`没有找到符合条件的匹配。可尝试：缩短窗口（形态更通用）、关闭防前视限制、放宽市场范围、或降低粗筛门槛（当前要求32点形态余弦>${meta.settings.coarseThreshold.toFixed(2)}）。`;
+    $("btNote").textContent=`没有找到符合条件的匹配。可尝试：缩短窗口（形态更通用）、关闭防前视限制、放宽市场范围、或降低粗筛门槛（当前要求32点形态余弦>${(meta.settings.coarseThresholdEffective??meta.settings.coarseThreshold).toFixed(2)}）。`;
     setMsg("匹配","完成，但无匹配结果。");return;
   }
   const bt=$("btStats");bt.textContent="";

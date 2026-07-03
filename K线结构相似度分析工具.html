@@ -55,7 +55,7 @@ details summary{cursor:pointer;font-size:13px;color:#2a78d6;margin-top:8px}
 </head>
 <body>
 <h1>K线结构相似度分析工具 <span style="font-size:12px;color:#999">v2</span></h1>
-<p class="sub">通达信本地数据 · 结构/均线/量价分析 · 同期联动 + 历史滑窗形态搜索 · 数据仅在本机读取，不会上传</p>
+<p class="sub">通达信本地数据 · 结构/均线/量价分析 · 同期联动 + 历史滑窗形态搜索 · 数据仅在本机读取，不会上传 <span id="buildInfo" style="color:#bbb">dev</span></p>
 
 <div class="panel">
   <div class="controls">
@@ -129,7 +129,7 @@ details summary{cursor:pointer;font-size:13px;color:#2a78d6;margin-top:8px}
     <div><h2>均线支撑统计</h2><div class="tblwrap"><table id="maTable"></table></div><p class="hint">回踩守住＝当日最低触及均线2%以内且收盘守住；有效跌破＝收盘低于均线2%以上。</p></div>
     <div><h2>波段结构（收盘价 ZigZag）</h2><div class="tblwrap"><table id="swTable"></table></div></div>
   </div>
-  <h2>月度量价</h2><div class="tblwrap"><table id="moTable"></table></div>
+  <div id="moBox"><h2>月度量价</h2><div class="tblwrap"><table id="moTable"></table></div></div>
   <div class="stats" id="vpStats"></div>
 </div>
 
@@ -415,6 +415,10 @@ function bootstrapWinInterval(values,iterations=1000,seed=20260703){
   samples.sort((a,b)=>a-b);return [samples[Math.floor(iterations*.025)],samples[Math.min(iterations-1,Math.floor(iterations*.975))]];
 }
 function isCacheValid(hit,file,rv,ver=ALGO_VER){return !!hit&&hit.ver===ver&&hit.rv===rv&&hit.size===file.size&&hit.mtime===file.lastModified}
+function adaptiveCoarseThreshold(base,L){
+  // 短窗口（周线/月线常见）重采样为32点后余弦噪声更大，按窗口长度线性放宽门槛，最多降低0.15。
+  return Math.max(0.3,base-Math.min(0.15,Math.max(0,48-L)*0.005));
+}
 
 function idbOpen(){
   return new Promise((res,rej)=>{
@@ -442,11 +446,11 @@ function idbPutBatch(db,recs){
   });
 }
 
-async function getStock(key,cache,pending){
+async function getStock(key,pending){
   const f0=FILES.get(key);
   if(!f0)return null;
   const file=f0.getFile?await f0.getFile():f0;
-  const hit=cache.get(key)||(DB?await idbGet(DB,key):null);
+  const hit=DB?await idbGet(DB,key):null;
   if(isCacheValid(hit,file,RIGHTS_STAMP,ALGO_VER)){
     return {dates:new Int32Array(hit.dates),closes:new Float64Array(hit.closes),vols:new Float64Array(hit.vols),warn:hit.warn,qStatus:hit.qStatus,qEvents:hit.qEvents,lastD:hit.lastD};
   }
@@ -506,13 +510,12 @@ self.onmessage=async ev=>{
 async function runMatch(cfg){
   if(!DB){try{DB=await idbOpen()}catch(_){DB=null}}
   // 缓存按证券惰性读取，避免把全市场历史数组一次性反序列化进内存。
-  const cache=new Map();
   const pending=[];
   const post=o=>postMessage(o);
 
   const refKey=cfg.refKey;
   const timeframe=normalizeTimeframe(cfg.timeframe);
-  const refDaily=await getStock(refKey,cache,pending);
+  const refDaily=await getStock(refKey,pending);
   if(!refDaily){post({type:"error",msg:"未找到参考股票数据"});return}
   const refStk=aggregateSeries(refDaily,timeframe,cfg.d2);
   refStk.ma20=ma20Arr(refStk.closes);
@@ -543,6 +546,7 @@ async function runMatch(cfg){
   }
   const refStartD=refStk.dates[rs],refEndD=refStk.dates[re];
 
+  const stSet=new Set(cfg.exST?cfg.stKeys||[]:[]);
   const keys=[];
   for(const k of FILES.keys()){
     const mkt=k.slice(0,2),c=k.slice(2);
@@ -554,12 +558,13 @@ async function runMatch(cfg){
     else if(mkt==="sh"&&/^(51|56|58)/.test(c)||mkt==="sz"&&/^(15|16)/.test(c))board="etf";
     if(!board)continue;
     if(!cfg.boards[board])continue;
-    if(cfg.exST&&cfg.stKeys.includes(k))continue;
+    if(cfg.exST&&stSet.has(k))continue;
     keys.push(k);
   }
 
   const t0=Date.now();
   const coarseThreshold=Math.min(0.95,Math.max(0.3,Number(cfg.coarseThreshold)||0.75));
+  const coarseThresholdEffective=adaptiveCoarseThreshold(coarseThreshold,L);
   const K_COARSE=Math.min(2000,Math.max(50,Math.floor(cfg.coarseLimit)||600));
   const K_DTW=Math.min(K_COARSE,Math.max(20,Math.floor(cfg.dtwLimit)||200));
   const dtwBand=Math.min(24,Math.max(1,Math.floor(cfg.dtwBand)||6));
@@ -573,16 +578,23 @@ async function runMatch(cfg){
   const skip=(reason,key,err)=>{skipped++;skipReasons[reason]=(skipReasons[reason]||0)+1;if(err&&skipDetails.length<8)skipDetails.push({key,reason,error:String(err&&err.message||err)})};
   const total=keys.length;
 
-  for(const key of keys){
+  // 4路并发预取：读文件/读缓存与计算重叠，缩短首次全市场扫描耗时。
+  const PREFETCH=4,inflight=new Map();
+  const prefetch=i=>{for(let j=i;j<Math.min(total,i+PREFETCH);j++){const k2=keys[j];if(!inflight.has(k2))inflight.set(k2,getStock(k2,pending).catch(err=>({__loadError:err})))}};
+
+  for(let ki=0;ki<total;ki++){
+    const key=keys[ki];
     if(cancelled){post({type:"cancelled"});return}
     done++;
+    prefetch(ki);
     if(done%40===0){
       const el=(Date.now()-t0)/1000,rate=done/el;
       post({type:"progress",done,total,rate:rate.toFixed(0),eta:Math.max(0,(total-done)/rate).toFixed(0),phase:"粗筛"});
       await new Promise(r=>setTimeout(r));
     }
     try{
-      const daily=await getStock(key,cache,pending);
+      const daily=await inflight.get(key);inflight.delete(key);
+      if(daily&&daily.__loadError)throw daily.__loadError;
       if(!daily){skip("无数据",key);continue}
       const stk=aggregateSeries(daily,timeframe);
       const n=stk.dates.length;
@@ -613,7 +625,7 @@ async function runMatch(cfg){
         peerRef.zma=zscore(rma);peerRef.zvol=zscore(rvol);
         const sub=subScores(peerStk,0,peerStk.closes.length-1,peerRef,cfg.zzth);
         sub.cum=cum;sub.ret=ret;
-        coarse.push({key,s,e,sub,warn:stk.warn,stk:packStk(stk,s,e)});
+        coarse.push({key,s,e,sub,warn:stk.warn,stk:packStk(stk,s,e),coarse:0.5*cum+0.5*ret});
       }else{
         const minLen=mode==="recent"?L:L+5;
         if(n<minLen){skip("窗口数据不足",key);continue}
@@ -646,16 +658,14 @@ async function runMatch(cfg){
           let dot=0;
           for(let q=0;q<32;q++)dot+=((scratch[q]-m)/sd)*R.z32[q];
           const cs=dot/32;
-          if(cs>coarseThreshold)bestOfStock.push([cs,s]);
+          if(cs>coarseThresholdEffective)bestOfStock.push([cs,s]);
         }
         if(!bestOfStock.length){skip("形态粗筛未通过",key);continue}
         bestOfStock.sort((a,b)=>b[0]-a[0]);
         bestOfStock=bestOfStock.slice(0,10);
-        if(!stk.ma20)stk.ma20=ma20Arr(stk.closes);
         for(const[cs,s]of bestOfStock){
-          const e=s+L-1;
-          const sub=subScores(stk,s,e,R,cfg.zzth);
-          coarse.push({key,s,e,sub,warn:stk.warn,stk:packStk(stk,s,e),coarse:cs});
+          // 粗筛只保留轻量候选（key+窗口+粗分），完整子分与展示数据延迟到全局裁剪之后计算，显著降低内存峰值。
+          coarse.push({key,s,e:s+L-1,coarse:cs,warn:stk.warn});
         }
       }
     }catch(err){skip("计算异常",key,err)}
@@ -665,6 +675,28 @@ async function runMatch(cfg){
   coarse.length=0;coarse.push(...diversified);
 
   post({type:"progress",done:total,total,phase:"精排",rate:"",eta:""});
+  // 精排：仅对全局裁剪后的候选（≤K_COARSE）按证券重新读取解析缓存，计算完整子分与展示数据。
+  {
+    const byKey=new Map();
+    for(const c of coarse){if(!c.sub||!c.stk){if(!byKey.has(c.key))byKey.set(c.key,[]);byKey.get(c.key).push(c)}}
+    let rdone=0;
+    for(const[key,cands]of byKey){
+      if(cancelled){post({type:"cancelled"});return}
+      let stk=null;
+      try{
+        const daily=await getStock(key,pending);
+        if(daily){stk=aggregateSeries(daily,timeframe);stk.ma20=ma20Arr(stk.closes)}
+      }catch(_){}
+      for(const c of cands){
+        if(stk&&c.e<stk.dates.length){c.sub=subScores(stk,c.s,c.e,R,cfg.zzth);c.stk=packStk(stk,c.s,c.e)}
+        else c.drop=true;
+      }
+      if(++rdone%40===0)await new Promise(r=>setTimeout(r));
+    }
+    if(pending.length&&DB)await idbPutBatch(DB,pending.splice(0));
+    const finalists=coarse.filter(c=>!c.drop&&c.sub&&c.stk);
+    coarse.length=0;coarse.push(...finalists);
+  }
   const W=cfg.weights,wsum=W.ret+W.cum+W.zig+W.ma+W.vol+W.vdd||1;
   for(const c of coarse){
     const s=c.sub;
@@ -702,7 +734,7 @@ async function runMatch(cfg){
   };
   const rows=kept.map(toRow),statRows=dedupeOverlaps(kept,0.7,L).map(toRow),statSummary={};
   for(const hk of["r5","r10","r20","r60"]){const raw=statRows.map(r=>r.fut[hk]).filter(Number.isFinite),clusters=clusterHorizonValues(statRows,hk,7).sort((a,b)=>a-b);statSummary[hk]={rawN:raw.length,periodN:clusters.length,win:clusters.length?clusters.filter(x=>x>0).length/clusters.length:null,interval:bootstrapWinInterval(clusters),median:clusters.length?clusters[Math.floor(clusters.length/2)]:null}}
-  post({type:"result",rows,statRows,meta:{mode,timeframe,recentBars:effectiveRecentBars,scanned:total,skipped,skipReasons,skipDetails,settings:{preset:cfg.preset||"custom",coarseThreshold,K_COARSE,K_DTW,dtwBand},statSummary,L,refStartD,refEndD,elapsed:((Date.now()-t0)/1000).toFixed(1),
+  post({type:"result",rows,statRows,meta:{mode,timeframe,recentBars:effectiveRecentBars,scanned:total,skipped,skipReasons,skipDetails,settings:{preset:cfg.preset||"custom",coarseThreshold,coarseThresholdEffective,K_COARSE,K_DTW,dtwBand},statSummary,L,refStartD,refEndD,elapsed:((Date.now()-t0)/1000).toFixed(1),
     refWarn:refStk.warn,candidates:coarse.length,refNn:Array.from(resample(refStk.closes.subarray(rs,re+1),120)).map(x=>x/refStk.closes[rs])}});
 }
 
@@ -711,14 +743,6 @@ function lastIdxBefore(dates,d){
   while(lo<=hi){const m=(lo+hi)>>1;if(dates[m]<d){ans=m+1;lo=m+1}else hi=m-1}
   return ans;
 }
-function pushCand(arr,c,K){
-  arr.push(c);
-  if(arr.length>K*1.5){
-    arr.sort((a,b)=>(b.coarse||scoreOf(b))-(a.coarse||scoreOf(a)));
-    arr.length=K;
-  }
-}
-function scoreOf(c){const s=c.sub;return (s.ret+s.cum)/2}
 function packStk(stk,s,e){
   const L=e-s+1,c0=stk.closes[s];
   const win=Array.from(stk.closes.subarray(s,e+1));
@@ -742,7 +766,7 @@ function packStk(stk,s,e){
   return {startD:stk.dates[s],endD:stk.dates[e],win,nnSmall,fut,futNn:futNn.length>1?Array.from(resample(new Float64Array(futNn),Math.min(60,futNn.length))):[],lastD:stk.lastD};
 }
 self.__KLINE_TEST_API__={version:ALGO_VER,parseDayBuffer,resolveRightsState,corporateActionFactor,applyCorporateActions,
-  aggregateSeries,periodKey,zscore,cosine,dtwDist,zigAmps,alignCommonDates,sliceSeriesByDate,dedupeOverlaps,mergePerStockCandidates,historicalMaxEnd,recentWindowStarts,recentFreshnessCutoff,wilsonInterval,clusterHorizonValues,bootstrapWinInterval,isCacheValid};
+  aggregateSeries,periodKey,zscore,cosine,dtwDist,zigAmps,alignCommonDates,sliceSeriesByDate,dedupeOverlaps,mergePerStockCandidates,historicalMaxEnd,recentWindowStarts,recentFreshnessCutoff,wilsonInterval,clusterHorizonValues,bootstrapWinInterval,isCacheValid,adaptiveCoarseThreshold};
 </script>
 
 <script>
@@ -841,10 +865,13 @@ async function finishLoad(tnf){
   }
 }
 
+let workerUrl=null;
 async function initWorker(){
   if(worker)worker.terminate();
+  if(workerUrl){URL.revokeObjectURL(workerUrl);workerUrl=null}
   const src=$("workerSrc").textContent;
-  worker=new Worker(URL.createObjectURL(new Blob([src],{type:"application/javascript"})));
+  workerUrl=URL.createObjectURL(new Blob([src],{type:"application/javascript"}));
+  worker=new Worker(workerUrl);
   worker.onmessage=onWorkerMsg;
   worker.onerror=e=>{setMsg("匹配","Worker错误："+e.message);matchDone()}
   let gbbq=null,rightsStamp="raw";
@@ -868,6 +895,26 @@ function lastIndexOnOrBefore(dates,target){
   let lo=0,hi=dates.length-1,ans=-1;while(lo<=hi){const m=(lo+hi)>>1;if(dates[m]<=target){ans=m;lo=m+1}else hi=m-1}return ans;
 }
 
+const PREF_KEY="kline_prefs_v1";
+const PREF_IDS=["timeframe","zz","step","recentBars","perStock","topN","isolate","fMain","fCyb","fKcb","fBj","fEtf","fSt","fNew","wRet","wCum","wZig","wMa","wVol","wVdd","wDtw","matchPreset","coarseTh","coarseLimit","dtwLimit","dtwBand"];
+function savePrefs(){
+  try{
+    const o={};
+    for(const id of PREF_IDS){const el=$(id);if(!el)continue;o[id]=el.type==="checkbox"?el.checked:el.value}
+    o.mode=document.querySelector('input[name=mode]:checked').value;
+    localStorage.setItem(PREF_KEY,JSON.stringify(o));
+  }catch(_){}
+}
+function loadPrefs(){
+  try{
+    const o=JSON.parse(localStorage.getItem(PREF_KEY)||"null");if(!o)return;
+    for(const id of PREF_IDS){const el=$(id);if(!el||!(id in o))continue;if(el.type==="checkbox")el.checked=!!o[id];else el.value=o[id]}
+    if(o.mode){const r=document.querySelector(`input[name=mode][value="${o.mode}"]`);if(r)r.checked=true}
+  }catch(_){}
+}
+loadPrefs();
+document.addEventListener("change",e=>{const t=e.target;if(t&&(PREF_IDS.includes(t.id)||t.name==="mode"))savePrefs()});
+
 let savedIsolate=$("isolate").checked;
 function syncModeControls(){
   const mode=document.querySelector('input[name=mode]:checked').value,isHist=mode==="hist",isRecent=mode==="recent";
@@ -885,6 +932,7 @@ function syncTimeframe(){
   setMsg("周期",`已切换为${TF_LABEL[tf]}，请重新分析目标股票。`);
 }
 $("timeframe").addEventListener("change",syncTimeframe);
+if($("timeframe").value!=="day"){const u=TF_UNIT[$("timeframe").value];$("quickBtns").querySelectorAll("button[data-n]").forEach(b=>b.textContent=b.dataset.n+u)}
 const MATCH_PRESETS={stable:{coarseTh:.82,coarseLimit:400,dtwLimit:120,dtwBand:5},balanced:{coarseTh:.75,coarseLimit:600,dtwLimit:200,dtwBand:6},loose:{coarseTh:.65,coarseLimit:900,dtwLimit:300,dtwBand:8}};
 $("matchPreset").addEventListener("change",()=>{const p=MATCH_PRESETS[$("matchPreset").value];for(const[k,v]of Object.entries(p))$(k).value=v});
 
@@ -978,6 +1026,7 @@ async function analyze(code){
     tr.lastChild.className=g>=0?"up":"dn";
   }
 
+  $("moBox").style.display=timeframe==="month"?"none":"";
   const moT=$("moTable");moT.textContent="";
   addRow(moT,["月份","开","高","低","收","涨跌","成交量(万手)","成交额(亿)"],true);
   const months={};bars.forEach(b=>{(months[Math.floor(b.d/100)]=months[Math.floor(b.d/100)]||[]).push(b)});
@@ -1135,7 +1184,7 @@ function renderResults(){
   $("matchTitle").textContent=`匹配结果 · ${TF_LABEL[timeframe]} · ${modeTxt} · 窗口${meta.L}个${unit}线周期${meta.mode==="recent"?` · 近期范围${meta.recentBars}个周期`:""} · 扫描${meta.scanned}只 · 跳过${meta.skipped||0}只 · 耗时${meta.elapsed}秒`+(meta.refWarn?" · ⚠未复权":" · 真实权息前复权");
   if(!rows.length){
     $("btStats").textContent="";$("matchTable").querySelector("tbody").textContent="";
-    $("btNote").textContent=`没有找到符合条件的匹配。可尝试：缩短窗口（形态更通用）、关闭防前视限制、放宽市场范围、或降低粗筛门槛（当前要求32点形态余弦>${meta.settings.coarseThreshold.toFixed(2)}）。`;
+    $("btNote").textContent=`没有找到符合条件的匹配。可尝试：缩短窗口（形态更通用）、关闭防前视限制、放宽市场范围、或降低粗筛门槛（当前要求32点形态余弦>${(meta.settings.coarseThresholdEffective??meta.settings.coarseThreshold).toFixed(2)}）。`;
     setMsg("匹配","完成，但无匹配结果。");return;
   }
   const bt=$("btStats");bt.textContent="";

@@ -177,6 +177,15 @@ test('recent windows default to L and always include latest window', () => {
   assert.deepEqual(Array.from(api.recentWindowStarts(100, 20, 10, 3)), [80]);
 });
 
+test('coarse threshold adapts to short weekly/monthly windows', () => {
+  const { api } = loadWorker(HTML);
+  assert.equal(api.adaptiveCoarseThreshold(0.75, 120), 0.75);
+  assert.equal(api.adaptiveCoarseThreshold(0.75, 48), 0.75);
+  assert.ok(Math.abs(api.adaptiveCoarseThreshold(0.75, 28) - 0.65) < 1e-12);
+  assert.ok(Math.abs(api.adaptiveCoarseThreshold(0.75, 8) - 0.60) < 1e-12);
+  assert.equal(api.adaptiveCoarseThreshold(0.35, 8), 0.3);
+});
+
 test('recent mode freshness cutoff is 30 reference trading days before target end', () => {
   const { api } = loadWorker(HTML);
   const dates = Int32Array.from(Array.from({ length: 50 }, (_, i) => 20260001 + i));

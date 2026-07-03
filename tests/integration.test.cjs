@@ -19,7 +19,7 @@ test('peer mode slices dates and advanced presets feed effective matching settin
   assert.match(html, /sliceSeriesByDate\(stk,refStartD,refEndD\)/);
   for (const id of ['matchPreset', 'coarseTh', 'coarseLimit', 'dtwLimit', 'dtwBand']) assert.match(html, new RegExp(`id="${id}"`));
   assert.match(html, /coarseThreshold:Math\.min/);
-  assert.match(html, /settings:\{preset:cfg\.preset\|\|"custom",coarseThreshold,K_COARSE,K_DTW,dtwBand\}/);
+  assert.match(html, /settings:\{preset:cfg\.preset\|\|"custom",coarseThreshold,coarseThresholdEffective,K_COARSE,K_DTW,dtwBand\}/);
 });
 
 test('UI analysis consumes the canonical worker OHLC series', () => {
@@ -53,8 +53,35 @@ test('quick ranges use loaded trading dates and CSV records algorithm metadata',
 
 test('empty-result guidance reports the effective coarse threshold', () => {
   const html = fs.readFileSync(HTML_PATH, 'utf8');
-  assert.match(html, /meta\.settings\.coarseThreshold\.toFixed\(2\)/);
+  assert.match(html, /meta\.settings\.coarseThresholdEffective\?\?meta\.settings\.coarseThreshold/);
   assert.doesNotMatch(html, /当前要求32点形态余弦>0\.75/);
+});
+
+test('coarse scan keeps lightweight candidates and defers full scoring', () => {
+  const html = fs.readFileSync(HTML_PATH, 'utf8');
+  assert.match(html, /coarse\.push\(\{key,s,e:s\+L-1,coarse:cs,warn:stk\.warn\}\)/);
+  assert.match(html, /adaptiveCoarseThreshold\(coarseThreshold,L\)/);
+  assert.match(html, /cs>coarseThresholdEffective/);
+  assert.doesNotMatch(html, /function pushCand\(/);
+});
+
+test('stock files are prefetched concurrently and ST filter uses a Set', () => {
+  const html = fs.readFileSync(HTML_PATH, 'utf8');
+  assert.match(html, /const PREFETCH=4,inflight=new Map\(\)/);
+  assert.match(html, /stSet=new Set\(/);
+  assert.match(html, /stSet\.has\(k\)/);
+  assert.doesNotMatch(html, /cfg\.stKeys\.includes\(k\)/);
+});
+
+test('UI persists preferences and injects build metadata', () => {
+  const html = fs.readFileSync(HTML_PATH, 'utf8');
+  assert.match(html, /kline_prefs_v1/);
+  assert.match(html, /function savePrefs\(/);
+  assert.match(html, /function loadPrefs\(/);
+  assert.match(html, /id="buildInfo"/);
+  assert.doesNotMatch(html, /__KLINE_BUILD_META__/);
+  assert.match(html, /URL\.revokeObjectURL\(workerUrl\)/);
+  assert.match(html, /id="moBox"/);
 });
 
 test('critical HTML controls remain present', () => {

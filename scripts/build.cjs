@@ -1,5 +1,6 @@
 const fs = require('node:fs');
 const path = require('node:path');
+const { execSync } = require('node:child_process');
 
 const root = path.resolve(__dirname, '..');
 const rootHtml = path.join(root, 'K线结构相似度分析工具.html');
@@ -8,6 +9,19 @@ const srcDir = path.join(root, 'src');
 const templatePath = path.join(srcDir, 'page.template.html');
 const algorithmPath = path.join(srcDir, 'algorithm.js');
 const placeholder = '/*__KLINE_WORKER_SOURCE__*/';
+const metaPlaceholder = '__KLINE_BUILD_META__';
+
+// 默认写入确定性的 "dev"，保证提交产物可复现；--stamp 或 Cloudflare CI 环境下注入 git 短哈希与日期。
+function buildMeta() {
+  const ci = !!process.env.WORKERS_CI_COMMIT_SHA;
+  if (process.argv.includes('--check') || (!process.argv.includes('--stamp') && !ci)) return 'dev';
+  let sha = process.env.WORKERS_CI_COMMIT_SHA || '';
+  if (!sha) {
+    try { sha = execSync('git rev-parse HEAD', { cwd: root }).toString().trim(); } catch (_) { /* ignore */ }
+  }
+  const date = new Date().toISOString().slice(0, 10);
+  return sha ? `build ${sha.slice(0, 7)} · ${date}` : `build ${date}`;
+}
 
 function lf(text) { return text.replace(/\r\n/g, '\n'); }
 
@@ -18,14 +32,15 @@ function bootstrap() {
   if (!match) throw new Error('workerSrc block not found');
   fs.mkdirSync(srcDir, { recursive: true });
   fs.writeFileSync(algorithmPath, lf(match[2]).replace(/\n*$/, '') + '\n');
-  fs.writeFileSync(templatePath, html.replace(pattern, `$1${placeholder}$3`));
+  fs.writeFileSync(templatePath, html.replace(pattern, `$1${placeholder}$3`)
+    .replace(/(<span id="buildInfo"[^>]*>)[^<]*(<\/span>)/, `$1${metaPlaceholder}$2`));
 }
 
 if (!fs.existsSync(templatePath) || !fs.existsSync(algorithmPath)) bootstrap();
 const template = lf(fs.readFileSync(templatePath, 'utf8'));
 const algorithm = lf(fs.readFileSync(algorithmPath, 'utf8')).replace(/\n*$/, '');
 if (!template.includes(placeholder)) throw new Error('worker source placeholder not found');
-const output = template.replace(placeholder, algorithm);
+const output = template.replace(placeholder, algorithm).replace(metaPlaceholder, buildMeta());
 
 if (process.argv.includes('--check')) {
   for (const file of [rootHtml, publicHtml]) {

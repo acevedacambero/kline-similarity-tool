@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "build": "node scripts/build.cjs",
+    "build:cf": "npm test && node scripts/build.cjs --stamp",
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
     "test": "node --test tests/algorithm.test.cjs tests/integration.test.cjs"
