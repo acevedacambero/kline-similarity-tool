@@ -156,8 +156,8 @@ details summary{cursor:pointer;font-size:13px;color:#2a78d6;margin-top:8px}
 <script>
 "use strict";
 const $=id=>document.getElementById(id);
-const UI_ALGO_VER=9;
-let files=new Map(), benchmarkFiles=new Map(), names={}, gbbqFile=null, rightsState="raw", ref=null, worker=null, lastRows=null, lastStatRows=null, lastMeta=null, referenceDates=null, sortKey="score", sortAsc=false;
+const UI_ALGO_VER=10;
+let files=new Map(), benchmarkFiles=new Map(), names={}, gbbqFile=null, rightsState="raw", rightsContinuity="unchecked", ref=null, worker=null, lastRows=null, lastStatRows=null, lastMeta=null, referenceDates=null, sortKey="score", sortAsc=false;
 let seriesSeq=0;const seriesWait=new Map();
 
 const A_PREFIX={sh:["600","601","603","605","688","51","56","58"],sz:["000","001","002","003","300","301","15","16"],bj:["43","83","87","92"]};
@@ -569,6 +569,7 @@ function onWorkerMsg(ev){
   const m=ev.data;
   if(m.type==="rightsStatus"){
     rightsState=m.status||"error";
+    rightsContinuity=m.continuityStatus||"unchecked";
     setMsg("复权",m.ok?`真实权息数据已解密，覆盖 ${m.stocks} 只证券；后续分析与匹配均使用前复权。`:`权息状态：${m.reason||"读取失败"}；将明确使用原始价格。`);
   }else if(m.type==="cacheStatus"){
     if(m.error)setMsg("缓存","缓存维护未完成，不影响本次结果："+m.error);
@@ -610,7 +611,7 @@ function renderResults(){
     const v=document.createElement("div");v.className="v";v.style.fontSize="15px";
     if(summary&&summary.periodN){
       const[lo,hi]=summary.interval;
-      k.textContent=`${label}（有效${summary.rawN}/${summary.totalN}，完整率${(summary.completeRate*100).toFixed(0)}%，独立时段${summary.periodN}）`;
+      k.textContent=`${label}（有效n=${summary.rawN}/${summary.totalN}，完整率${(summary.completeRate*100).toFixed(0)}%，独立时段n=${summary.periodN}）`;
       const kind=summary.family==="excess"?"超额":"绝对";
       v.textContent=`${kind}簇级胜率${(summary.win*100).toFixed(0)}% · Bootstrap 95%区间${(lo*100).toFixed(0)}–${(hi*100).toFixed(0)}% · 中位${pct(summary.median)} · 中位滞后${summary.medianLagBars??"—"}${unit}`;
       v.className="v "+(summary.median>=0?"up":"dn");
@@ -619,7 +620,8 @@ function renderResults(){
   }
   {const p=meta.placebo?.r20,div=document.createElement("div");div.className="stat";const k=document.createElement("div");k.className="k";k.textContent="随机基线（200轮）";const v=document.createElement("div");v.className="v";v.style.fontSize="15px";v.textContent=p&&p.rounds?`20${unit}：匹配中位${pct(p.matchMedian)}，随机中位${pct(p.placeboMedian)}；优于随机${(p.betterRate*100).toFixed(0)}%轮（配对${p.pairedN}）`:"可配对样本不足";div.append(k,v);bt.appendChild(div)}
   const topSkips=Object.entries(meta.skipReasons||{}).sort((a,b)=>b[1]-a[1]).slice(0,3).map(([k,n])=>`${k}${n}只`).join("、");
-  $("btNote").textContent="注意：有本地指数时默认显示超额簇级胜率；统计先做同股重叠去重，再按相近结束日期聚类并计算Bootstrap区间。"+(topSkips?`主要淘汰：${topSkips}。`:"")+(meta.mode==="hist"?"已"+(rows.some(r=>r.endD>=meta.refStartD)?"关闭":"启用")+"防前视隔离。":meta.mode==="recent"?"近期模式用于寻找当前或近期形态，不等价于历史回测；最新窗口通常没有完整未来收益。":"同期模式下\"未来收益\"为目标区间结束后的实际走势。");
+  const passRate=f.windows?f.coarsePassed/f.windows:0,thresholdHint=passRate<.001?"粗筛通过率很低，可考虑降低门槛。":passRate>.20?"粗筛通过率很高，可考虑提高门槛。":"";
+  $("btNote").textContent="注意：有本地指数时默认显示超额簇级胜率；统计先做同股重叠去重，再按相近结束日期聚类并计算Bootstrap区间。"+thresholdHint+(topSkips?`主要淘汰：${topSkips}。`:"")+(meta.mode==="hist"?"已"+(rows.some(r=>r.endD>=meta.refStartD)?"关闭":"启用")+"防前视隔离。":meta.mode==="recent"?"近期模式用于寻找当前或近期形态，不等价于历史回测；最新窗口通常没有完整未来收益。":"同期模式下\"未来收益\"为目标区间结束后的实际走势。");
 
   const thead=$("matchTable").querySelector("thead");thead.textContent="";
   const cols=[["idx","#",false],["key","代码",true],["name","名称",false],["range","匹配区间",true],["nn","走势",false],
@@ -664,8 +666,8 @@ function renderResults(){
         g.stroke();
       }else{
         td.textContent=c;
-        if(ci>=12&&ci<=16){const v2=[r.fut.r5,r.fut.r10,r.fut.r20,r.fut.r60,r.fut.maxUp][ci-12];if(v2!==null&&v2!==undefined)td.className=v2>=0?"up":"dn"}
-        if(ci===17)td.className="dn";
+        if(ci>=13&&ci<=17){const v2=[r.fut.r5,r.fut.r10,r.fut.r20,r.fut.r60,r.fut.maxUp][ci-13];if(v2!==null&&v2!==undefined)td.className=v2>=0?"up":"dn"}
+        if(ci===18)td.className="dn";
       }
       tr.appendChild(td);
     });
@@ -730,13 +732,14 @@ $("btnCsv").onclick=()=>{
   if(!lastRows)return;
   const rowKey=r=>`${r.key}|${r.startD}|${r.endD}`;
   const statSampleKeys=new Set((lastStatRows||[]).map(rowKey));
-  const head=["代码","名称","开始","结束","模式","周期","近期范围","综合分","累计走势","收益序列","拐点","均线","量能","幅度相似","DTW","复权存疑","权息状态","统计样本","算法版本","粗筛阈值","粗筛候选","DTW候选","DTW带宽","跳过原因","基准代码","绝对收益r5","绝对收益r10","绝对收益r20","绝对收益r60","基准收益r5","基准收益r10","基准收益r20","基准收益r60","超额收益r5","超额收益r10","超额收益r20","超额收益r60","max60涨","max60撤"];
+  const head=["代码","名称","开始","结束","模式","周期","近期范围","综合分","累计走势","收益序列","拐点","均线","量能","幅度相似","DTW","复权存疑","权息状态","权息连续性","统计样本","算法版本","粗筛阈值","粗筛候选","DTW候选","DTW带宽","跳过原因","漏斗证券","漏斗窗口","漏斗粗筛","漏斗全局","漏斗精排","漏斗DTW","漏斗去重","漏斗展示","基准代码","绝对收益r5","绝对收益r10","绝对收益r20","绝对收益r60","基准收益r5","基准收益r10","基准收益r20","基准收益r60","超额收益r5","超额收益r10","超额收益r20","超额收益r60","max60涨","max60撤"];
   const lines=[head.join(",")];
   lastRows.forEach(r=>{
     lines.push([r.key.slice(2),(names[r.key]||"").replace(/,/g,""),r.startD,r.endD,lastMeta.mode,lastMeta.timeframe||"day",lastMeta.recentBars??"",r.score.toFixed(4),
       r.sub.cum.toFixed(3),r.sub.ret.toFixed(3),r.sub.zig.toFixed(3),r.sub.ma.toFixed(3),r.sub.vol.toFixed(3),r.sub.amp.toFixed(3),
-      r.sub.dtw!==undefined?r.sub.dtw.toFixed(3):"",r.warn?1:0,rightsState,statSampleKeys.has(rowKey(r))?1:0,UI_ALGO_VER,
+      r.sub.dtw!==undefined?r.sub.dtw.toFixed(3):"",r.warn?1:0,rightsState,rightsContinuity,statSampleKeys.has(rowKey(r))?1:0,UI_ALGO_VER,
       lastMeta.settings.coarseThreshold,lastMeta.settings.K_COARSE,lastMeta.settings.K_DTW,lastMeta.settings.dtwBand,Object.entries(lastMeta.skipReasons||{}).map(([k,n])=>k+":"+n).join(";"),
+      ...["stocks","windows","coarsePassed","globalKept","refined","dtw","deduped","shown"].map(k=>lastMeta.funnel?.[k]??""),
       r.benchmarkKey||"",
       ...[r.fut.r5,r.fut.r10,r.fut.r20,r.fut.r60,r.benchmark.r5,r.benchmark.r10,r.benchmark.r20,r.benchmark.r60,r.excess.r5,r.excess.r10,r.excess.r20,r.excess.r60,r.fut.maxUp,r.fut.maxDn].map(x=>x===null||x===undefined?"":(x*100).toFixed(2))
     ].join(","));

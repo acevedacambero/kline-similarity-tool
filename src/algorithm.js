@@ -1,5 +1,5 @@
 "use strict";
-const ALGO_VER=9;
+const ALGO_VER=10;
 let FILES=null, BENCHMARK_FILES=new Map(), BENCHMARKS=new Map(), RIGHTS=new Map(), RIGHTS_STATE={status:"raw",reason:"missing",count:0}, RIGHTS_STAMP="raw", cancelled=false, DB=null, CACHE_TOUCHES=new Set();
 
 function boardOfKey(key){
@@ -725,7 +725,7 @@ async function runMatch(cfg){
   const placebo={};for(const hk of["r5","r10","r20","r60"])placebo[hk]=placeboSummary(statRows,placeboPool,hk,200,20260703);
   for(const hk of["r5","r10","r20","r60"]){
     const maturity=summarizeHorizon(statRows,hk),family=maturity.excessN?"excess":"fut";
-    const clusters=clusterHorizonValues(statRows,hk,7,family).sort((a,b)=>a-b);
+    const clusters=(family==="fut"?clusterHorizonValues(statRows,hk,7):clusterHorizonValues(statRows,hk,7,family)).sort((a,b)=>a-b);
     statSummary[hk]={...maturity,family,periodN:clusters.length,win:clusters.length?clusters.filter(x=>x>0).length/clusters.length:null,interval:bootstrapWinInterval(clusters),median:medianOf(clusters)};
   }
   try{const cache=await maintainCache(DB);post({type:"cacheStatus",...cache})}catch(err){post({type:"cacheStatus",error:String(err)})}

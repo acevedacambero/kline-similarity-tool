@@ -6,6 +6,10 @@ const { findHtml } = require('./load-worker.cjs');
 const { loadPage } = require('./load-page.cjs');
 const HTML_PATH = findHtml();
 
+test('page uses algorithm version ten', () => {
+  assert.match(fs.readFileSync(HTML_PATH,'utf8'),/UI_ALGO_VER=10/);
+});
+
 test('main page script starts without a runtime exception', () => {
   assert.doesNotThrow(() => loadPage(HTML_PATH));
 });
