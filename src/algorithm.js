@@ -359,6 +359,23 @@ function normalizeFunnel(f){
   if(out.coarsePassed>out.windows||out.globalKept>out.coarsePassed||out.refined>out.globalKept||out.dtw>out.refined||out.deduped>out.refined||out.shown>out.deduped)throw new Error("匹配漏斗计数不守恒");
   return out;
 }
+function stableHash(s){let h=2166136261>>>0;for(let i=0;i<s.length;i++){h^=s.charCodeAt(i);h=Math.imul(h,16777619)}return h>>>0}
+function seededRandom(seed){let x=seed>>>0||1;return()=>{x^=x<<13;x^=x>>>17;x^=x<<5;return(x>>>0)/4294967296}}
+function samplePlaceboStarts(key,starts,limit=8,seed=20260703){
+  const a=[...starts],rnd=seededRandom(stableHash(key+":"+seed));for(let i=a.length-1;i>0;i--){const j=Math.floor(rnd()*(i+1));[a[i],a[j]]=[a[j],a[i]]}return a.slice(0,limit);
+}
+function rankPlacebos(target,pool){
+  return pool.filter(p=>p.key!==target.key).map(p=>({p,rank:[p.board===target.board?0:1,Math.abs(dateOrdinal(p.endD)-dateOrdinal(target.endD)),Math.abs(Math.log((p.sd||1e-9)/(target.sd||1e-9))),p.key,p.endD]})).sort((a,b)=>{for(let i=0;i<a.rank.length;i++){if(a.rank[i]<b.rank[i])return-1;if(a.rank[i]>b.rank[i])return 1}return 0}).map(x=>x.p);
+}
+function placeboSummary(matches,pool,horizon,rounds=200,seed=20260703){
+  const matchVals=matches.map(m=>m.excess?.[horizon]).filter(Number.isFinite),matchMedian=medianOf(matchVals),matchWin=matchVals.length?matchVals.filter(x=>x>0).length/matchVals.length:null,rnd=seededRandom(seed),roundStats=[];
+  for(let r=0;r<rounds;r++){
+    const used=new Set(),vals=[];
+    for(const m of matches){const ranked=rankPlacebos(m,pool).filter(p=>Number.isFinite(p.excess?.[horizon])&&!used.has(p.id));if(!ranked.length)continue;const band=ranked.slice(0,Math.min(5,ranked.length)),p=band[Math.floor(rnd()*band.length)];used.add(p.id);vals.push(p.excess[horizon])}
+    if(vals.length)roundStats.push({n:vals.length,win:vals.filter(x=>x>0).length/vals.length,median:medianOf(vals)});
+  }
+  return {rounds:roundStats.length,pairedN:roundStats.length?Math.round(roundStats.reduce((n,x)=>n+x.n,0)/roundStats.length):0,matchWin,matchMedian,placeboWin:roundStats.length?roundStats.reduce((n,x)=>n+x.win,0)/roundStats.length:null,placeboMedian:roundStats.length?medianOf(roundStats.map(x=>x.median)):null,betterRate:roundStats.length&&matchMedian!==null?roundStats.filter(x=>matchMedian>x.median).length/roundStats.length:null};
+}
 
 
 function idbOpen(){
@@ -532,6 +549,8 @@ async function runMatch(cfg){
   const dtwBand=Math.min(24,Math.max(1,Math.floor(cfg.dtwBand)||6));
   const coarse=[];
   const funnel={stocks:keys.length,windows:0,coarsePassed:0,globalKept:0,refined:0,dtw:0,deduped:0,shown:0};
+  const placeboPool=[];
+  const addPlacebos=(key,stk,starts)=>{for(const s of samplePlaceboStarts(key,starts,8)){const e=s+L-1;if(e>=stk.dates.length)continue;const packed=packStk(stk,s,e,benchmarkFor(key)),stats=windowStats(stk.closes,s,e);placeboPool.push({id:`${key}:${s}`,key,board:boardOfKey(key),startD:packed.startD,endD:packed.endD,sd:stats.sd,fut:packed.fut,benchmark:packed.benchmark,excess:packed.excess,lagBars:packed.lagBars})}};
   const scratch=new Float64Array(32);
   const mode=cfg.mode;
   const freshnessBars=timeframe==="month"?2:timeframe==="week"?6:30;
@@ -581,6 +600,7 @@ async function runMatch(cfg){
         const ret=Math.max(0,cosine(zscore(ra),zscore(rb)));
         if(0.5*cum+0.5*ret<0.3){skip("同期粗筛未通过",key);continue}
         const s=al.bIndices[0],e=al.bIndices[al.bIndices.length-1];
+        addPlacebos(key,stk,[s]);
         const peerStk={closes:al.bCloses,vols:al.bVols};peerStk.ma20=ma20Arr(peerStk.closes);
         const peerRef={zcum:zscore(al.aCloses.map(x=>Math.log(x))),zret:zscore(retSlice(al.aCloses,0,al.aCloses.length-1)),
           amps:zigAmps(al.aCloses,cfg.zzth),stats:windowStats(al.aCloses,0,al.aCloses.length-1)};
@@ -600,6 +620,7 @@ async function runMatch(cfg){
           let maxE=n-1;if(cfg.isolate)maxE=historicalMaxEnd(stk.dates,refStartD);
           starts=[];for(let s=0;s+L-1<=maxE;s+=cfg.step)starts.push(s);
         }
+        addPlacebos(key,stk,starts);
         const lsAll=new Float64Array(n);
         for(let i=0;i<n;i++)lsAll[i]=Math.log(Math.max(stk.closes[i],1e-9));
         let bestOfStock=[];
@@ -697,17 +718,18 @@ async function runMatch(cfg){
 
   const toRow=c=>{
     const st=c.stk;
-    return {key:c.key,startD:st.startD,endD:st.endD,score:c.score,sub:c.sub,warn:c.warn,
+    return {key:c.key,board:boardOfKey(c.key),startD:st.startD,endD:st.endD,sd:windowStats(st.win,0,st.win.length-1).sd,score:c.score,sub:c.sub,warn:c.warn,
       fut:st.fut,benchmark:st.benchmark,excess:st.excess,lagBars:st.lagBars,benchmarkKey:benchmarkKeyFor(c.key),nn:st.nnSmall,futNn:st.futNn,lastD:st.lastD};
   };
   const rows=kept.slice(0,cfg.topN).map(toRow),statRows=dedupeOverlaps(kept,0.7,L).map(toRow),statSummary={};funnel.shown=rows.length;
+  const placebo={};for(const hk of["r5","r10","r20","r60"])placebo[hk]=placeboSummary(statRows,placeboPool,hk,200,20260703);
   for(const hk of["r5","r10","r20","r60"]){
     const maturity=summarizeHorizon(statRows,hk),family=maturity.excessN?"excess":"fut";
     const clusters=clusterHorizonValues(statRows,hk,7,family).sort((a,b)=>a-b);
     statSummary[hk]={...maturity,family,periodN:clusters.length,win:clusters.length?clusters.filter(x=>x>0).length/clusters.length:null,interval:bootstrapWinInterval(clusters),median:medianOf(clusters)};
   }
   try{const cache=await maintainCache(DB);post({type:"cacheStatus",...cache})}catch(err){post({type:"cacheStatus",error:String(err)})}
-  post({type:"result",rows,statRows,meta:{mode,timeframe,recentBars:effectiveRecentBars,scanned:total,skipped,skipReasons,skipDetails,funnel:normalizeFunnel(funnel),settings:{preset:cfg.preset||"custom",coarseThreshold,coarseThresholdEffective,K_COARSE,K_DTW,dtwBand},statSummary,L,refStartD,refEndD,elapsed:((Date.now()-t0)/1000).toFixed(1),
+  post({type:"result",rows,statRows,meta:{mode,timeframe,recentBars:effectiveRecentBars,scanned:total,skipped,skipReasons,skipDetails,funnel:normalizeFunnel(funnel),placebo,settings:{preset:cfg.preset||"custom",coarseThreshold,coarseThresholdEffective,K_COARSE,K_DTW,dtwBand},statSummary,L,refStartD,refEndD,elapsed:((Date.now()-t0)/1000).toFixed(1),
     refWarn:refStk.warn,candidates:coarse.length,refNn:Array.from(resample(refStk.closes.subarray(rs,re+1),120)).map(x=>x/refStk.closes[rs])}});
 }
 
@@ -745,4 +767,4 @@ function packStk(stk,s,e,benchmarkSeries=null){
   return {startD:stk.dates[s],endD:stk.dates[e],win,nnSmall,fut,benchmark,excess,lagBars,futNn:futNn.length>1?Array.from(resample(new Float64Array(futNn),Math.min(60,futNn.length))):[],lastD:stk.lastD};
 }
 self.__KLINE_TEST_API__={version:ALGO_VER,parseDayBuffer,resolveRightsState,corporateActionFactor,applyCorporateActions,
-  aggregateSeries,periodKey,zscore,cosine,dtwDist,zigAmps,alignCommonDates,sliceSeriesByDate,dedupeOverlaps,mergePerStockCandidates,historicalMaxEnd,recentWindowStarts,recentFreshnessCutoff,clusterHorizonValues,bootstrapWinInterval,isCacheValid,adaptiveCoarseThreshold,boardOfKey,benchmarkKeyFor,indexOnOrBefore,benchmarkReturn,excessReturn,medianOf,summarizeHorizon,ratioSimilarity,amplitudeSimilarity,estimateRecordBytes,selectCacheEvictions,validateRightsDiagnostics,validateContinuity,normalizeFunnel};
+  aggregateSeries,periodKey,zscore,cosine,dtwDist,zigAmps,alignCommonDates,sliceSeriesByDate,dedupeOverlaps,mergePerStockCandidates,historicalMaxEnd,recentWindowStarts,recentFreshnessCutoff,clusterHorizonValues,bootstrapWinInterval,isCacheValid,adaptiveCoarseThreshold,boardOfKey,benchmarkKeyFor,indexOnOrBefore,benchmarkReturn,excessReturn,medianOf,summarizeHorizon,ratioSimilarity,amplitudeSimilarity,estimateRecordBytes,selectCacheEvictions,validateRightsDiagnostics,validateContinuity,normalizeFunnel,samplePlaceboStarts,rankPlacebos,placeboSummary};

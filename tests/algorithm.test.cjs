@@ -169,6 +169,27 @@ test('funnel stages are monotonic after coarse screening', () => {
   assert.throws(()=>api.normalizeFunnel({stocks:1,windows:10,coarsePassed:11,globalKept:1,refined:1,dtw:1,deduped:1,shown:1}));
 });
 
+test('placebo window sampling is deterministic and capped per stock', () => {
+  const { api } = loadWorker(HTML);
+  const starts=Array.from({length:40},(_,i)=>i);
+  assert.deepEqual(Array.from(api.samplePlaceboStarts('sh600000',starts,8,20260703)),Array.from(api.samplePlaceboStarts('sh600000',starts,8,20260703)));
+  assert.equal(api.samplePlaceboStarts('sh600000',starts,8,20260703).length,8);
+});
+
+test('placebo matching prioritizes board then date and volatility', () => {
+  const { api } = loadWorker(HTML);
+  const target={key:'sh600000',board:'main',endD:20260110,sd:.02};
+  const pool=[{key:'sz300001',board:'cyb',endD:20260110,sd:.02,id:'wrong-board'},{key:'sh600001',board:'main',endD:20260109,sd:.08,id:'near-date'},{key:'sh600002',board:'main',endD:20260109,sd:.021,id:'best'}];
+  assert.equal(api.rankPlacebos(target,pool)[0].id,'best');
+});
+
+test('matched placebo summary is reproducible for a fixed seed', () => {
+  const { api } = loadWorker(HTML);
+  const matches=[{key:'sh600000',board:'main',endD:20260110,sd:.02,excess:{r5:.03}}];
+  const pool=[{id:'p1',key:'sh600001',board:'main',endD:20260110,sd:.02,excess:{r5:.01}}];
+  assert.deepEqual(JSON.parse(JSON.stringify(api.placeboSummary(matches,pool,'r5',200,20260703))),JSON.parse(JSON.stringify(api.placeboSummary(matches,pool,'r5',200,20260703))));
+});
+
 test('similarity primitives are stable on edge cases', () => {
   const { api } = loadWorker(HTML);
   assert.deepEqual(Array.from(api.zscore([3, 3, 3])), [0, 0, 0]);

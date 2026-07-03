@@ -72,6 +72,11 @@ test('matching funnel is visible and exportable', () => {
   for(const marker of ['证券','窗口','粗筛','全局','精排','去重','展示'])assert.ok(html.includes(marker),marker);
 });
 
+test('placebo baseline is shown with its fixed round count', () => {
+  const html=fs.readFileSync(HTML_PATH,'utf8');
+  assert.ok(html.includes('随机基线（200轮）'));
+});
+
 test('result protocol contains effective statistical samples', () => {
   const html = fs.readFileSync(HTML_PATH, 'utf8');
   assert.match(html, /statRows/);
