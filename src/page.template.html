@@ -104,6 +104,7 @@ details summary{cursor:pointer;font-size:13px;color:#2a78d6;margin-top:8px}
         <span class="wgt">均线结构<input type="number" id="wMa" value="15"></span>
         <span class="wgt">量能结构<input type="number" id="wVol" value="10"></span>
         <span class="wgt">波动/回撤<input type="number" id="wVdd" value="10"></span>
+        <span class="wgt">幅度相似<input type="number" id="wAmp" value="10"></span>
         <span class="wgt">DTW重排权重%<input type="number" id="wDtw" value="15"></span>
       </div>
     </details>
@@ -305,7 +306,7 @@ function lastIndexOnOrBefore(dates,target){
 }
 
 const PREF_KEY="kline_prefs_v1";
-const PREF_IDS=["timeframe","zz","step","recentBars","perStock","topN","isolate","fMain","fCyb","fKcb","fBj","fEtf","fSt","fNew","wRet","wCum","wZig","wMa","wVol","wVdd","wDtw","matchPreset","coarseTh","coarseLimit","dtwLimit","dtwBand"];
+const PREF_IDS=["timeframe","zz","step","recentBars","perStock","topN","isolate","fMain","fCyb","fKcb","fBj","fEtf","fSt","fNew","wRet","wCum","wZig","wMa","wVol","wVdd","wAmp","wDtw","matchPreset","coarseTh","coarseLimit","dtwLimit","dtwBand"];
 function savePrefs(){
   try{
     const o={};
@@ -547,7 +548,7 @@ $("btnM").onclick=()=>{
     perStock:parseInt($("perStock").value),topN:parseInt($("topN").value),
     boards:{main:$("fMain").checked,cyb:$("fCyb").checked,kcb:$("fKcb").checked,bj:$("fBj").checked,etf:$("fEtf").checked},
     exST:$("fSt").checked,stKeys,exNew:$("fNew").checked,
-    weights:{ret:+$("wRet").value||0,cum:+$("wCum").value||0,zig:+$("wZig").value||0,ma:+$("wMa").value||0,vol:+$("wVol").value||0,vdd:+$("wVdd").value||0},
+    weights:{ret:+$("wRet").value||0,cum:+$("wCum").value||0,zig:+$("wZig").value||0,ma:+$("wMa").value||0,vol:+$("wVol").value||0,vdd:+$("wVdd").value||0,amp:+$("wAmp").value||0},
     wDtw:+$("wDtw").value||0
   };
   $("btnM").disabled=true;$("btnC").style.display="";
@@ -617,7 +618,7 @@ function renderResults(){
 
   const thead=$("matchTable").querySelector("thead");thead.textContent="";
   const cols=[["idx","#",false],["key","代码",true],["name","名称",false],["range","匹配区间",true],["nn","走势",false],
-    ["score","综合分",true],["cum","累计走势",true],["ret","收益序列",true],["zig","拐点",true],["ma","均线",true],["vol","量能",true],["dtw","DTW",true],
+    ["score","综合分",true],["cum","累计走势",true],["ret","收益序列",true],["zig","拐点",true],["ma","均线",true],["vol","量能",true],["amp","幅度",true],["dtw","DTW",true],
     ["r5",`+5${unit}`,true],["r10",`+10${unit}`,true],["r20",`+20${unit}`,true],["r60",`+60${unit}`,true],["maxUp",`60${unit}最大涨`,true],["maxDn",`60${unit}最大回撤`,true]];
   const trh=document.createElement("tr");
   for(const[k2,label,sortable]of cols){
@@ -630,7 +631,7 @@ function renderResults(){
   const get=r=>{
     if(sortKey==="key")return r.key;
     if(sortKey==="range")return r.startD;
-    if(["cum","ret","zig","ma","vol","dtw"].includes(sortKey))return r.sub[sortKey]??-1;
+    if(["cum","ret","zig","ma","vol","amp","dtw"].includes(sortKey))return r.sub[sortKey]??-1;
     if(["r5","r10","r20","r60","maxUp","maxDn"].includes(sortKey))return r.fut[sortKey]??-999;
     return r[sortKey];
   };
@@ -643,7 +644,7 @@ function renderResults(){
   sorted.forEach((r,i)=>{
     const tr=document.createElement("tr");tr.className="row";
     const cells=[String(i+1),r.key.slice(2)+(r.warn?" ⚠":""),names[r.key]||"—",fmtD(r.startD)+"~"+fmtD(r.endD),null,
-      r.score.toFixed(3),(r.sub.cum*100).toFixed(0)+"%",(r.sub.ret*100).toFixed(0)+"%",(r.sub.zig*100).toFixed(0)+"%",(r.sub.ma*100).toFixed(0)+"%",(r.sub.vol*100).toFixed(0)+"%",
+      r.score.toFixed(3),(r.sub.cum*100).toFixed(0)+"%",(r.sub.ret*100).toFixed(0)+"%",(r.sub.zig*100).toFixed(0)+"%",(r.sub.ma*100).toFixed(0)+"%",(r.sub.vol*100).toFixed(0)+"%",(r.sub.amp*100).toFixed(0)+"%",
       r.sub.dtw!==undefined?(r.sub.dtw*100).toFixed(0)+"%":"—",
       pct(r.fut.r5),pct(r.fut.r10),pct(r.fut.r20),pct(r.fut.r60),pct(r.fut.maxUp),pct(r.fut.maxDn)];
     cells.forEach((c,ci)=>{
@@ -724,11 +725,11 @@ $("btnCsv").onclick=()=>{
   if(!lastRows)return;
   const rowKey=r=>`${r.key}|${r.startD}|${r.endD}`;
   const statSampleKeys=new Set((lastStatRows||[]).map(rowKey));
-  const head=["代码","名称","开始","结束","模式","周期","近期范围","综合分","累计走势","收益序列","拐点","均线","量能","DTW","复权存疑","权息状态","统计样本","算法版本","粗筛阈值","粗筛候选","DTW候选","DTW带宽","跳过原因","基准代码","绝对收益r5","绝对收益r10","绝对收益r20","绝对收益r60","基准收益r5","基准收益r10","基准收益r20","基准收益r60","超额收益r5","超额收益r10","超额收益r20","超额收益r60","max60涨","max60撤"];
+  const head=["代码","名称","开始","结束","模式","周期","近期范围","综合分","累计走势","收益序列","拐点","均线","量能","幅度相似","DTW","复权存疑","权息状态","统计样本","算法版本","粗筛阈值","粗筛候选","DTW候选","DTW带宽","跳过原因","基准代码","绝对收益r5","绝对收益r10","绝对收益r20","绝对收益r60","基准收益r5","基准收益r10","基准收益r20","基准收益r60","超额收益r5","超额收益r10","超额收益r20","超额收益r60","max60涨","max60撤"];
   const lines=[head.join(",")];
   lastRows.forEach(r=>{
     lines.push([r.key.slice(2),(names[r.key]||"").replace(/,/g,""),r.startD,r.endD,lastMeta.mode,lastMeta.timeframe||"day",lastMeta.recentBars??"",r.score.toFixed(4),
-      r.sub.cum.toFixed(3),r.sub.ret.toFixed(3),r.sub.zig.toFixed(3),r.sub.ma.toFixed(3),r.sub.vol.toFixed(3),
+      r.sub.cum.toFixed(3),r.sub.ret.toFixed(3),r.sub.zig.toFixed(3),r.sub.ma.toFixed(3),r.sub.vol.toFixed(3),r.sub.amp.toFixed(3),
       r.sub.dtw!==undefined?r.sub.dtw.toFixed(3):"",r.warn?1:0,rightsState,statSampleKeys.has(rowKey(r))?1:0,UI_ALGO_VER,
       lastMeta.settings.coarseThreshold,lastMeta.settings.K_COARSE,lastMeta.settings.K_DTW,lastMeta.settings.dtwBand,Object.entries(lastMeta.skipReasons||{}).map(([k,n])=>k+":"+n).join(";"),
       r.benchmarkKey||"",

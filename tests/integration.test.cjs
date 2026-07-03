@@ -52,6 +52,12 @@ test('result UI and CSV expose excess returns and sample maturity', () => {
   for(const marker of ['超额簇级胜率','完整率','中位滞后','基准收益r5','超额收益r5'])assert.ok(html.includes(marker),marker);
 });
 
+test('amplitude similarity has a default weight of ten', () => {
+  const html=fs.readFileSync(HTML_PATH,'utf8');
+  assert.match(html,/id="wAmp" value="10"/);
+  assert.match(html,/amp:\+\$\("wAmp"\)\.value/);
+});
+
 test('result protocol contains effective statistical samples', () => {
   const html = fs.readFileSync(HTML_PATH, 'utf8');
   assert.match(html, /statRows/);

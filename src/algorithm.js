@@ -230,17 +230,19 @@ function ma20Arr(c){
   return out;
 }
 function windowStats(c,s,e){
-  let pk=0,mdd=0;
+  let pk=0,mdd=0,minLog=Infinity,maxLog=-Infinity;
   const rets=[];
   for(let i=s;i<=e;i++){
-    if(c[i]>pk)pk=c[i];
+    if(c[i]>pk)pk=c[i];const lc=Math.log(Math.max(c[i],1e-9));if(lc<minLog)minLog=lc;if(lc>maxLog)maxLog=lc;
     const dd=c[i]/pk-1;if(dd<mdd)mdd=dd;
     if(i>s)rets.push(c[i]/c[i-1]-1);
   }
   let m=0;for(const r of rets)m+=r;m/=rets.length||1;
   let sd=0;for(const r of rets)sd+=(r-m)*(r-m);sd=Math.sqrt(sd/(rets.length||1));
-  return {mdd,sd};
+  return {mdd,sd,range:maxLog-minLog};
 }
+function ratioSimilarity(a,b){return a>0&&b>0?Math.exp(-Math.abs(Math.log(a/b))):.5}
+function amplitudeSimilarity(a,b){return .7*ratioSimilarity(a.sd,b.sd)+.3*ratioSimilarity(a.range,b.range)}
 function logSlice(c,s,e){
   const out=new Float64Array(e-s+1);
   for(let i=s;i<=e;i++)out[i-s]=Math.log(Math.max(c[i],1e-9));
@@ -362,7 +364,7 @@ function subScores(stk,s,e,R,zzth){
   const volS=Math.max(0,cosine(zscore(lv),R.zvol));
   const ws=windowStats(stk.closes,s,e);
   const vdd=Math.max(0,1-Math.min(1,Math.abs(ws.sd-R.stats.sd)/(R.stats.sd+1e-9)*0.7+Math.abs(ws.mdd-R.stats.mdd)*1.8));
-  return {cum,ret,zig,ma:maS,vol:volS,vdd};
+  return {cum,ret,zig,ma:maS,vol:volS,vdd,amp:amplitudeSimilarity(ws,R.stats)};
 }
 
 self.onmessage=async ev=>{
@@ -584,10 +586,10 @@ async function runMatch(cfg){
     const finalists=coarse.filter(c=>!c.drop&&c.sub&&c.stk);
     coarse.length=0;coarse.push(...finalists);
   }
-  const W=cfg.weights,wsum=W.ret+W.cum+W.zig+W.ma+W.vol+W.vdd||1;
+  const W=cfg.weights,wsum=W.ret+W.cum+W.zig+W.ma+W.vol+W.vdd+(W.amp||0)||1;
   for(const c of coarse){
     const s=c.sub;
-    c.score=(W.ret*s.ret+W.cum*s.cum+W.zig*s.zig+W.ma*s.ma+W.vol*s.vol+W.vdd*s.vdd)/wsum;
+    c.score=(W.ret*s.ret+W.cum*s.cum+W.zig*s.zig+W.ma*s.ma+W.vol*s.vol+W.vdd*s.vdd+(W.amp||0)*s.amp)/wsum;
     if(c.warn)c.score*=0.92;
   }
   coarse.sort((a,b)=>b.score-a.score);
@@ -663,4 +665,4 @@ function packStk(stk,s,e,benchmarkSeries=null){
   return {startD:stk.dates[s],endD:stk.dates[e],win,nnSmall,fut,benchmark,excess,lagBars,futNn:futNn.length>1?Array.from(resample(new Float64Array(futNn),Math.min(60,futNn.length))):[],lastD:stk.lastD};
 }
 self.__KLINE_TEST_API__={version:ALGO_VER,parseDayBuffer,resolveRightsState,corporateActionFactor,applyCorporateActions,
-  aggregateSeries,periodKey,zscore,cosine,dtwDist,zigAmps,alignCommonDates,sliceSeriesByDate,dedupeOverlaps,mergePerStockCandidates,historicalMaxEnd,recentWindowStarts,recentFreshnessCutoff,clusterHorizonValues,bootstrapWinInterval,isCacheValid,adaptiveCoarseThreshold,boardOfKey,benchmarkKeyFor,indexOnOrBefore,benchmarkReturn,excessReturn,medianOf,summarizeHorizon};
+  aggregateSeries,periodKey,zscore,cosine,dtwDist,zigAmps,alignCommonDates,sliceSeriesByDate,dedupeOverlaps,mergePerStockCandidates,historicalMaxEnd,recentWindowStarts,recentFreshnessCutoff,clusterHorizonValues,bootstrapWinInterval,isCacheValid,adaptiveCoarseThreshold,boardOfKey,benchmarkKeyFor,indexOnOrBefore,benchmarkReturn,excessReturn,medianOf,summarizeHorizon,ratioSimilarity,amplitudeSimilarity};

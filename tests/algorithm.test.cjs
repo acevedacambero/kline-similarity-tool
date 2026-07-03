@@ -130,6 +130,13 @@ test('horizon summary reports completeness and median lag bars', () => {
   assert.equal(s.medianLagBars,10);
 });
 
+test('amplitude similarity is symmetric and neutral for invalid scales', () => {
+  const { api } = loadWorker(HTML);
+  assert.ok(Math.abs(api.ratioSimilarity(2,1)-api.ratioSimilarity(1,2))<1e-12);
+  assert.equal(api.ratioSimilarity(0,1),.5);
+  assert.equal(api.amplitudeSimilarity({sd:.02,range:.10},{sd:.02,range:.10}),1);
+});
+
 test('similarity primitives are stable on edge cases', () => {
   const { api } = loadWorker(HTML);
   assert.deepEqual(Array.from(api.zscore([3, 3, 3])), [0, 0, 0]);
