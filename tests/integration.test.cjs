@@ -180,3 +180,18 @@ test('daily weekly and monthly matching use one canonical timeframe pipeline', (
   assert.match(html, /aggregateSeries\(daily,timeframe\)/);
   assert.match(html, /meta:\{mode,timeframe,recentBars/);
 });
+
+test('Eastmoney local data source is selectable and wired end to end', () => {
+  const html = fs.readFileSync(HTML_PATH, 'utf8');
+  assert.match(html, /id="dataSource"/);
+  assert.match(html, /<option value="em">\u4e1c\u65b9\u8d22\u5bcc<\/option>|<option value="em">东方财富<\/option>/);
+  assert.match(html, /sqliteScanTable\(buf,"dists_day_bar",9/);
+  assert.match(html, /sqliteScanTable\(buf,"dists_instrument",12/);
+  assert.match(html, /"em:__meta__"/);
+  assert.match(html, /type:"emReady"/);
+  assert.match(html, /async function scanEmRoot\(/);
+  assert.match(html, /StkQuoteList_V/);
+  assert.match(html, /SOURCE==="em"/);
+  assert.match(html, /source:"em"/);
+  assert.match(html, /emApplyFactors\(/);
+});

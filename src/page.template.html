@@ -59,9 +59,10 @@ details summary{cursor:pointer;font-size:13px;color:#2a78d6;margin-top:8px}
 
 <div class="panel">
   <div class="controls">
-    <div class="ctl"><label>第一步：选择通达信根目录（需同时包含 vipdoc 与 T0002）</label>
+    <div class="ctl"><label>数据来源</label><select id="dataSource"><option value="tdx" selected>通达信</option><option value="em">东方财富</option></select></div>
+    <div class="ctl"><label id="dirHint">第一步：选择通达信根目录（需同时包含 vipdoc 与 T0002）</label>
       <div style="display:flex;gap:6px;align-items:center">
-        <label for="dir" style="display:inline-block;cursor:pointer;background:#2a78d6;color:#fff;border-radius:6px;padding:7px 14px;font-size:14px;font-weight:500;user-select:none">选择通达信根目录</label>
+        <label for="dir" id="dirLabel" style="display:inline-block;cursor:pointer;background:#2a78d6;color:#fff;border-radius:6px;padding:7px 14px;font-size:14px;font-weight:500;user-select:none">选择通达信根目录</label>
         <button type="button" id="btnDir" class="sec mini" title="使用目录访问API，弹窗无“上传”字样；部分环境不支持">无提示方式</button>
       </div>
       <input type="file" id="dir" webkitdirectory multiple style="display:none">
@@ -157,6 +158,7 @@ const $=id=>document.getElementById(id);
 const UI_ALGO_VER=8;
 let files=new Map(), names={}, gbbqFile=null, rightsOK=false, rightsState="raw", ref=null, worker=null, lastRows=null, lastStatRows=null, lastMeta=null, referenceDates=null, sortKey="score", sortAsc=false;
 let seriesSeq=0;const seriesWait=new Map();
+let emFiles=null,emStKeys=[];
 
 const A_PREFIX={sh:["600","601","603","605","688","51","56","58"],sz:["000","001","002","003","300","301","15","16"],bj:["43","83","87","92"]};
 
@@ -170,6 +172,19 @@ function checkBrowserCapabilities(){
 }
 checkBrowserCapabilities();
 
+function isEmSource(){return $("dataSource").value==="em"}
+function syncSourceUI(fromUser){
+  const em=isEmSource();
+  $("dirLabel").textContent=em?"选择东方财富目录":"选择通达信根目录";
+  $("dirHint").textContent=em?"第一步：选择东方财富安装目录（含 basic_data 与 config）":"第一步：选择通达信根目录（需同时包含 vipdoc 与 T0002）";
+  if(fromUser){
+    files=new Map();emFiles=null;names={};emStKeys=[];gbbqFile=null;rightsOK=false;
+    $("btnA").disabled=$("btnM").disabled=true;
+    setMsg("来源",em?"已切换为东方财富本地数据：请选择东方财富安装目录（如 D:\\Program Files\\eastmoney）。注意：数据深度以东财本地下载为准，且不含北交所。":"已切换为通达信本地数据：请选择通达信根目录。");
+  }
+}
+$("dataSource").addEventListener("change",()=>syncSourceUI(true));
+
 $("btnDir").onclick=async()=>{
   if(!window.showDirectoryPicker){setMsg("读取","此环境不支持目录访问API，请使用蓝色\"选择 vipdoc 文件夹\"按钮。");return}
   let root;
@@ -179,6 +194,7 @@ $("btnDir").onclick=async()=>{
     setMsg("读取",`目录访问API不可用（${err&&err.name||err}），请使用蓝色"选择 vipdoc 文件夹"按钮。`);
     return;
   }
+  if(isEmSource()){await scanEmRoot(root);return}
   setMsg("读取","正在扫描目录…（仅本地读取，不会上传）");
   files=new Map();names={};gbbqFile=null;rightsOK=false;
   const getDir=async(h,path)=>{let cur=h;for(const seg of path){try{cur=await cur.getDirectoryHandle(seg)}catch(_){return null}}return cur};
@@ -200,7 +216,39 @@ $("btnDir").onclick=async()=>{
   await finishLoad(tnf);
 };
 
+async function scanEmRoot(root){
+  setMsg("读取","正在扫描东方财富目录…（仅本地读取，不会上传）");
+  const getDir=async(h,path)=>{let cur=h;for(const seg of path){try{cur=await cur.getDirectoryHandle(seg)}catch(_){return null}}return cur};
+  const sel={dayBar:[],instrument:[],names:[]};
+  const grab=async(dir,re,arr)=>{if(!dir)return;for await(const[nm,h]of dir.entries()){if(h.kind==="file"&&re.test(nm)){try{arr.push(await h.getFile())}catch(_){}}}};
+  await grab(await getDir(root,["basic_data","day_bar"]),/^(SHSE|SZSE)_\d{4}\.dat$/,sel.dayBar);
+  await grab(await getDir(root,["basic_data","history_instrument"]),/^(SHSE|SZSE)_\d{4}\.dat$/,sel.instrument);
+  await grab(await getDir(root,["config","DataBackUp","StkQuoteList"]),/^StkQuoteList_V\d+_\d+\.dat$/i,sel.names);
+  await finishLoadEm(sel);
+}
+async function finishLoadEm(sel){
+  const shard=f=>parseInt((f.name.match(/_(\d+)\.dat$/i)||[])[1]||"0",10);
+  sel.dayBar.sort((a,b)=>a.name<b.name?-1:1);
+  sel.instrument.sort((a,b)=>a.name<b.name?-1:1);
+  sel.names.sort((a,b)=>shard(a)-shard(b));
+  if(!sel.dayBar.length){setMsg("读取","未找到东方财富日线数据库（basic_data\\day_bar\\SHSE_*.dat / SZSE_*.dat）。请确认选择的是东方财富安装目录。");return}
+  emFiles=sel;files=new Map();names={};emStKeys=[];gbbqFile=null;rightsOK=false;
+  $("btnA").disabled=$("btnM").disabled=true;
+  setMsg("读取",`已找到东财日线库 ${sel.dayBar.length} 个、权息库 ${sel.instrument.length} 个、名称分片 ${sel.names.length} 个。首次解析需要一些时间，完成后走本地缓存秒开…`);
+  initWorker();
+}
 $("dir").addEventListener("change",async e=>{
+  if(isEmSource()){
+    const sel={dayBar:[],instrument:[],names:[]};
+    for(const f of e.target.files){
+      const p=(f.webkitRelativePath||f.name).replace(/\\/g,"/");
+      if(/basic_data\/day_bar\/(SHSE|SZSE)_\d{4}\.dat$/.test(p))sel.dayBar.push(f);
+      else if(/basic_data\/history_instrument\/(SHSE|SZSE)_\d{4}\.dat$/.test(p))sel.instrument.push(f);
+      else if(/StkQuoteList_V\d+_\d+\.dat$/i.test(p))sel.names.push(f);
+    }
+    await finishLoadEm(sel);
+    return;
+  }
   files=new Map();names={};gbbqFile=null;rightsOK=false;
   const tnf=[];
   for(const f of e.target.files){
@@ -256,6 +304,10 @@ async function initWorker(){
   worker=new Worker(workerUrl);
   worker.onmessage=onWorkerMsg;
   worker.onerror=e=>{setMsg("匹配","Worker错误："+e.message);matchDone()}
+  if(isEmSource()&&emFiles){
+    worker.postMessage({type:"files",source:"em",emDayBar:emFiles.dayBar,emInstrument:emFiles.instrument,emNames:emFiles.names});
+    return;
+  }
   let gbbq=null,rightsStamp="raw";
   if(gbbqFile){
     try{gbbq=await gbbqFile.arrayBuffer();rightsStamp=`${gbbqFile.size}:${gbbqFile.lastModified}`}catch(_){}
@@ -278,7 +330,7 @@ function lastIndexOnOrBefore(dates,target){
 }
 
 const PREF_KEY="kline_prefs_v1";
-const PREF_IDS=["timeframe","zz","step","recentBars","perStock","topN","isolate","fMain","fCyb","fKcb","fBj","fEtf","fSt","fNew","wRet","wCum","wZig","wMa","wVol","wVdd","wDtw","matchPreset","coarseTh","coarseLimit","dtwLimit","dtwBand"];
+const PREF_IDS=["dataSource","timeframe","zz","step","recentBars","perStock","topN","isolate","fMain","fCyb","fKcb","fBj","fEtf","fSt","fNew","wRet","wCum","wZig","wMa","wVol","wVdd","wDtw","matchPreset","coarseTh","coarseLimit","dtwLimit","dtwBand"];
 function savePrefs(){
   try{
     const o={};
@@ -295,6 +347,7 @@ function loadPrefs(){
   }catch(_){}
 }
 loadPrefs();
+syncSourceUI(false);
 document.addEventListener("change",e=>{const t=e.target;if(t&&(PREF_IDS.includes(t.id)||t.name==="mode"))savePrefs()});
 
 let savedIsolate=$("isolate").checked;
@@ -538,6 +591,20 @@ function matchDone(){
 
 function onWorkerMsg(ev){
   const m=ev.data;
+  if(m.type==="emReady"){
+    if(m.error){setMsg("读取","东方财富数据解析失败："+m.error);return}
+    names={};
+    for(const k of m.keys){const nm=m.names[k.slice(2)];if(nm)names[k]=nm}
+    emStKeys=m.stKeys||[];
+    const dl=$("codeList");dl.textContent="";
+    const frag=document.createDocumentFragment();
+    for(const k of m.keys){const o=document.createElement("option");o.value=k.slice(2);o.label=names[k]||"";frag.appendChild(o)}
+    dl.appendChild(frag);
+    rightsOK=true;rightsState="em-adj";
+    $("btnA").disabled=$("btnM").disabled=!m.keys.length;
+    setMsg("就绪",`东方财富数据加载完成：${m.keys.length} 只证券，名称 ${Object.keys(names).length} 条，复权因子已应用（ST 过滤使用官方标记）。数据范围以东财本地下载为准，不含北交所。`);
+    return;
+  }
   if(m.type==="rightsStatus"){
     rightsOK=!!m.ok;rightsState=m.status||"error";
     setMsg("复权",m.ok?`真实权息数据已解密，覆盖 ${m.stocks} 只证券；后续分析与匹配均使用前复权。`:`权息状态：${m.reason||"读取失败"}；将明确使用原始价格。`);

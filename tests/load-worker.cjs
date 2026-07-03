@@ -18,7 +18,7 @@ function loadWorker(htmlPath) {
   const context = vm.createContext({
     self, postMessage: self.postMessage, console, setTimeout, clearTimeout,
     Map, Array, Object, Math, Date, Promise, ArrayBuffer, DataView,
-    Uint8Array, Int32Array, Float64Array,
+    Uint8Array, Int32Array, Float64Array, TextDecoder,
     atob: s => Buffer.from(s, 'base64').toString('binary'),
     indexedDB: { open() { throw new Error('disabled in unit tests'); } }
   });
