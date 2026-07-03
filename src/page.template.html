@@ -136,6 +136,7 @@ details summary{cursor:pointer;font-size:13px;color:#2a78d6;margin-top:8px}
 
 <div class="panel" id="matchPanel" style="display:none">
   <h2 id="matchTitle">匹配结果</h2>
+  <div class="hint" id="funnel"></div>
   <div class="stats" id="btStats"></div>
   <p class="hint" id="btNote"></p>
   <div style="margin:6px 0"><button id="btnCsv" class="sec mini">导出CSV</button></div>
@@ -591,6 +592,7 @@ function renderResults(){
   const rows=lastRows,meta=lastMeta;
   const statRows=lastStatRows||rows;
   $("matchPanel").style.display="block";
+  const f=meta.funnel||{};$("funnel").textContent=`证券 ${f.stocks??0} → 窗口 ${(f.windows??0).toLocaleString()} → 粗筛 ${(f.coarsePassed??0).toLocaleString()} → 全局 ${f.globalKept??0} → 精排 ${f.refined??0}（其中DTW重排 ${f.dtw??0}）→ 去重 ${f.deduped??0} → 展示 ${f.shown??0}`;
   const modeTxt=meta.mode==="hist"?"历史滑窗搜索":meta.mode==="recent"?"近期相似区间":"同期联动";
   const timeframe=meta.timeframe||"day",unit=TF_UNIT[timeframe];
   $("matchTitle").textContent=`匹配结果 · ${TF_LABEL[timeframe]} · ${modeTxt} · 窗口${meta.L}个${unit}线周期${meta.mode==="recent"?` · 近期范围${meta.recentBars}个周期`:""} · 扫描${meta.scanned}只 · 跳过${meta.skipped||0}只 · 耗时${meta.elapsed}秒`+(meta.refWarn?" · ⚠未复权":" · 真实权息前复权");

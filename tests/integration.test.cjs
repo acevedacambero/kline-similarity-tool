@@ -66,6 +66,12 @@ test('cache maintenance uses the approved count and quota limits', () => {
   assert.ok(html.includes('cacheStatus'));
 });
 
+test('matching funnel is visible and exportable', () => {
+  const html=fs.readFileSync(HTML_PATH,'utf8');
+  assert.match(html,/id="funnel"/);
+  for(const marker of ['证券','窗口','粗筛','全局','精排','去重','展示'])assert.ok(html.includes(marker),marker);
+});
+
 test('result protocol contains effective statistical samples', () => {
   const html = fs.readFileSync(HTML_PATH, 'utf8');
   assert.match(html, /statRows/);

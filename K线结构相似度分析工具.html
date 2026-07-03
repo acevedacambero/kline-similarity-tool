@@ -136,6 +136,7 @@ details summary{cursor:pointer;font-size:13px;color:#2a78d6;margin-top:8px}
 
 <div class="panel" id="matchPanel" style="display:none">
   <h2 id="matchTitle">匹配结果</h2>
+  <div class="hint" id="funnel"></div>
   <div class="stats" id="btStats"></div>
   <p class="hint" id="btNote"></p>
   <div style="margin:6px 0"><button id="btnCsv" class="sec mini">导出CSV</button></div>
@@ -505,6 +506,11 @@ function selectCacheEvictions(records,{ver,maxCount,maxBytes=Infinity,targetRati
   }
   return removed;
 }
+function normalizeFunnel(f){
+  const keys=["stocks","windows","coarsePassed","globalKept","refined","dtw","deduped","shown"],out={};for(const k of keys)out[k]=Math.max(0,Math.floor(f[k]||0));
+  if(out.coarsePassed>out.windows||out.globalKept>out.coarsePassed||out.refined>out.globalKept||out.dtw>out.refined||out.deduped>out.refined||out.shown>out.deduped)throw new Error("匹配漏斗计数不守恒");
+  return out;
+}
 
 
 function idbOpen(){
@@ -677,6 +683,7 @@ async function runMatch(cfg){
   const K_DTW=Math.min(K_COARSE,Math.max(20,Math.floor(cfg.dtwLimit)||200));
   const dtwBand=Math.min(24,Math.max(1,Math.floor(cfg.dtwBand)||6));
   const coarse=[];
+  const funnel={stocks:keys.length,windows:0,coarsePassed:0,globalKept:0,refined:0,dtw:0,deduped:0,shown:0};
   const scratch=new Float64Array(32);
   const mode=cfg.mode;
   const freshnessBars=timeframe==="month"?2:timeframe==="week"?6:30;
@@ -712,6 +719,7 @@ async function runMatch(cfg){
 
       if(mode==="peer"){
         if(key===refKey)continue;
+        funnel.windows++;
         const refWin={dates:refStk.dates.subarray(rs,re+1),periods:refStk.periods?refStk.periods.subarray(rs,re+1):undefined,closes:refStk.closes.subarray(rs,re+1),vols:refStk.vols.subarray(rs,re+1)};
         const peerSlice=sliceSeriesByDate(stk,refStartD,refEndD);
         const al=alignCommonDates(refWin,peerSlice);
@@ -731,7 +739,7 @@ async function runMatch(cfg){
         const refMa=ma20Arr(al.aCloses),rma=new Float64Array(al.aCloses.length),rvol=new Float64Array(al.aCloses.length);
         for(let q=0;q<al.aCloses.length;q++){rma[q]=Number.isNaN(refMa[q])?0:(al.aCloses[q]-refMa[q])/refMa[q];rvol[q]=Math.log(1+al.aVols[q])}
         peerRef.zma=zscore(rma);peerRef.zvol=zscore(rvol);
-        const sub=subScores(peerStk,0,peerStk.closes.length-1,peerRef,cfg.zzth);
+        funnel.coarsePassed++;const sub=subScores(peerStk,0,peerStk.closes.length-1,peerRef,cfg.zzth);
         sub.cum=cum;sub.ret=ret;
         coarse.push({key,s,e,sub,warn:stk.warn,stk:packStk(stk,s,e,benchmarkFor(key)),coarse:0.5*cum+0.5*ret});
       }else{
@@ -755,6 +763,7 @@ async function runMatch(cfg){
             if(mode==="recent"&&overlapRatio({s,e},{s:rs,e:re},L)>0.7)continue;
             if(mode!=="recent"&&!(e<rs||s>re))continue;
           }
+          funnel.windows++;
           for(let q=0;q<32;q++){
             const t=q*(L-1)/31,j=Math.floor(t),f=t-j;
             const a=lsAll[s+j],b=s+j+1<=e?lsAll[s+j+1]:a;
@@ -766,7 +775,7 @@ async function runMatch(cfg){
           let dot=0;
           for(let q=0;q<32;q++)dot+=((scratch[q]-m)/sd)*R.z32[q];
           const cs=dot/32;
-          if(cs>coarseThresholdEffective)bestOfStock.push([cs,s]);
+          if(cs>coarseThresholdEffective){funnel.coarsePassed++;bestOfStock.push([cs,s])}
         }
         if(!bestOfStock.length){skip("形态粗筛未通过",key);continue}
         bestOfStock.sort((a,b)=>b[0]-a[0]);
@@ -780,6 +789,7 @@ async function runMatch(cfg){
   }
   if(pending.length&&DB)await idbPutBatch(DB,pending.splice(0));
   const diversified=mergePerStockCandidates(coarse,10,K_COARSE);
+  funnel.globalKept=diversified.length;
   coarse.length=0;coarse.push(...diversified);
 
   post({type:"progress",done:total,total,phase:"精排",rate:"",eta:""});
@@ -803,6 +813,7 @@ async function runMatch(cfg){
     }
     if(pending.length&&DB)await idbPutBatch(DB,pending.splice(0));
     const finalists=coarse.filter(c=>!c.drop&&c.sub&&c.stk);
+    funnel.refined=finalists.length;
     coarse.length=0;coarse.push(...finalists);
   }
   const W=cfg.weights,wsum=W.ret+W.cum+W.zig+W.ma+W.vol+W.vdd+(W.amp||0)||1;
@@ -813,6 +824,7 @@ async function runMatch(cfg){
   }
   coarse.sort((a,b)=>b.score-a.score);
   const dtwTop=coarse.slice(0,K_DTW),wd=Math.min(Math.max(cfg.wDtw,0),50)/100;
+  funnel.dtw=dtwTop.length;
   for(const c of dtwTop){
     const z=zscore(resample(c.stk.win.map(x=>Math.log(x)),48));
     const dist=dtwDist(z,R.z48,dtwBand);
@@ -832,22 +844,22 @@ async function runMatch(cfg){
     }
     if(ov)continue;
     arr.push(c);kept.push(c);
-    if(kept.length>=cfg.topN)break;
   }
+  funnel.deduped=kept.length;
 
   const toRow=c=>{
     const st=c.stk;
     return {key:c.key,startD:st.startD,endD:st.endD,score:c.score,sub:c.sub,warn:c.warn,
       fut:st.fut,benchmark:st.benchmark,excess:st.excess,lagBars:st.lagBars,benchmarkKey:benchmarkKeyFor(c.key),nn:st.nnSmall,futNn:st.futNn,lastD:st.lastD};
   };
-  const rows=kept.map(toRow),statRows=dedupeOverlaps(kept,0.7,L).map(toRow),statSummary={};
+  const rows=kept.slice(0,cfg.topN).map(toRow),statRows=dedupeOverlaps(kept,0.7,L).map(toRow),statSummary={};funnel.shown=rows.length;
   for(const hk of["r5","r10","r20","r60"]){
     const maturity=summarizeHorizon(statRows,hk),family=maturity.excessN?"excess":"fut";
     const clusters=clusterHorizonValues(statRows,hk,7,family).sort((a,b)=>a-b);
     statSummary[hk]={...maturity,family,periodN:clusters.length,win:clusters.length?clusters.filter(x=>x>0).length/clusters.length:null,interval:bootstrapWinInterval(clusters),median:medianOf(clusters)};
   }
   try{const cache=await maintainCache(DB);post({type:"cacheStatus",...cache})}catch(err){post({type:"cacheStatus",error:String(err)})}
-  post({type:"result",rows,statRows,meta:{mode,timeframe,recentBars:effectiveRecentBars,scanned:total,skipped,skipReasons,skipDetails,settings:{preset:cfg.preset||"custom",coarseThreshold,coarseThresholdEffective,K_COARSE,K_DTW,dtwBand},statSummary,L,refStartD,refEndD,elapsed:((Date.now()-t0)/1000).toFixed(1),
+  post({type:"result",rows,statRows,meta:{mode,timeframe,recentBars:effectiveRecentBars,scanned:total,skipped,skipReasons,skipDetails,funnel:normalizeFunnel(funnel),settings:{preset:cfg.preset||"custom",coarseThreshold,coarseThresholdEffective,K_COARSE,K_DTW,dtwBand},statSummary,L,refStartD,refEndD,elapsed:((Date.now()-t0)/1000).toFixed(1),
     refWarn:refStk.warn,candidates:coarse.length,refNn:Array.from(resample(refStk.closes.subarray(rs,re+1),120)).map(x=>x/refStk.closes[rs])}});
 }
 
@@ -885,7 +897,7 @@ function packStk(stk,s,e,benchmarkSeries=null){
   return {startD:stk.dates[s],endD:stk.dates[e],win,nnSmall,fut,benchmark,excess,lagBars,futNn:futNn.length>1?Array.from(resample(new Float64Array(futNn),Math.min(60,futNn.length))):[],lastD:stk.lastD};
 }
 self.__KLINE_TEST_API__={version:ALGO_VER,parseDayBuffer,resolveRightsState,corporateActionFactor,applyCorporateActions,
-  aggregateSeries,periodKey,zscore,cosine,dtwDist,zigAmps,alignCommonDates,sliceSeriesByDate,dedupeOverlaps,mergePerStockCandidates,historicalMaxEnd,recentWindowStarts,recentFreshnessCutoff,clusterHorizonValues,bootstrapWinInterval,isCacheValid,adaptiveCoarseThreshold,boardOfKey,benchmarkKeyFor,indexOnOrBefore,benchmarkReturn,excessReturn,medianOf,summarizeHorizon,ratioSimilarity,amplitudeSimilarity,estimateRecordBytes,selectCacheEvictions,validateRightsDiagnostics,validateContinuity};
+  aggregateSeries,periodKey,zscore,cosine,dtwDist,zigAmps,alignCommonDates,sliceSeriesByDate,dedupeOverlaps,mergePerStockCandidates,historicalMaxEnd,recentWindowStarts,recentFreshnessCutoff,clusterHorizonValues,bootstrapWinInterval,isCacheValid,adaptiveCoarseThreshold,boardOfKey,benchmarkKeyFor,indexOnOrBefore,benchmarkReturn,excessReturn,medianOf,summarizeHorizon,ratioSimilarity,amplitudeSimilarity,estimateRecordBytes,selectCacheEvictions,validateRightsDiagnostics,validateContinuity,normalizeFunnel};
 </script>
 
 <script>
@@ -1327,6 +1339,7 @@ function renderResults(){
   const rows=lastRows,meta=lastMeta;
   const statRows=lastStatRows||rows;
   $("matchPanel").style.display="block";
+  const f=meta.funnel||{};$("funnel").textContent=`证券 ${f.stocks??0} → 窗口 ${(f.windows??0).toLocaleString()} → 粗筛 ${(f.coarsePassed??0).toLocaleString()} → 全局 ${f.globalKept??0} → 精排 ${f.refined??0}（其中DTW重排 ${f.dtw??0}）→ 去重 ${f.deduped??0} → 展示 ${f.shown??0}`;
   const modeTxt=meta.mode==="hist"?"历史滑窗搜索":meta.mode==="recent"?"近期相似区间":"同期联动";
   const timeframe=meta.timeframe||"day",unit=TF_UNIT[timeframe];
   $("matchTitle").textContent=`匹配结果 · ${TF_LABEL[timeframe]} · ${modeTxt} · 窗口${meta.L}个${unit}线周期${meta.mode==="recent"?` · 近期范围${meta.recentBars}个周期`:""} · 扫描${meta.scanned}只 · 跳过${meta.skipped||0}只 · 耗时${meta.elapsed}秒`+(meta.refWarn?" · ⚠未复权":" · 真实权息前复权");

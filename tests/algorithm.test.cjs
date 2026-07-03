@@ -162,6 +162,13 @@ test('rights continuity rejects material worsening and allows insufficient sampl
   assert.equal(api.validateContinuity([{raw:.04,adjusted:.01}]).status,'unchecked');
 });
 
+test('funnel stages are monotonic after coarse screening', () => {
+  const { api } = loadWorker(HTML);
+  const f=api.normalizeFunnel({stocks:100,windows:10000,coarsePassed:800,globalKept:500,refined:480,dtw:20,deduped:60,shown:50});
+  assert.deepEqual(JSON.parse(JSON.stringify(f)),{stocks:100,windows:10000,coarsePassed:800,globalKept:500,refined:480,dtw:20,deduped:60,shown:50});
+  assert.throws(()=>api.normalizeFunnel({stocks:1,windows:10,coarsePassed:11,globalKept:1,refined:1,dtw:1,deduped:1,shown:1}));
+});
+
 test('similarity primitives are stable on edge cases', () => {
   const { api } = loadWorker(HTML);
   assert.deepEqual(Array.from(api.zscore([3, 3, 3])), [0, 0, 0]);
