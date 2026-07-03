@@ -4,10 +4,11 @@
   "private": true,
   "scripts": {
     "build": "node scripts/build.cjs",
-    "build:cf": "npm test && node scripts/build.cjs --stamp",
+    "build:cf": "npm test && node scripts/build.cjs --stamp && node scripts/policy-check.cjs --require-stamp",
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
-    "test": "node --test tests/algorithm.test.cjs tests/integration.test.cjs"
+    "test:unit": "node --test tests/algorithm.test.cjs tests/integration.test.cjs",
+    "test": "npm run test:unit && node scripts/policy-check.cjs"
   },
   "devDependencies": {
     "wrangler": "^4.80.0"
