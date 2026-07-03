@@ -43,6 +43,8 @@ powershell -ExecutionPolicy Bypass -File .\tests\verify.ps1
 
 源码位于 `src/page.template.html` 与 `src/algorithm.js`。修改源码后运行 `npm run build`，会确定性生成根目录单文件和 `public/index.html`；验证脚本会拒绝过期的生成物。
 
+两台电脑轮流开发时，请遵循[接力开发流程](docs/TWO_COMPUTER_HANDOFF.md)，以 GitHub 分支和拉取请求作为唯一交接点。
+
 ## Cloudflare Workers 部署
 
 仓库包含可复现的 Static Assets 配置。部署副本位于 `public/index.html`，并由测试保证与根目录正式 HTML 完全一致。
