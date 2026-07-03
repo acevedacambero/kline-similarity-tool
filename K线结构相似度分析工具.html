@@ -1273,7 +1273,7 @@ $("btnA").onclick=()=>analyze($("code").value.trim());
 let lastChart=null;
 async function analyze(code){
   const key=keyOf(code),f=files.get(key);
-  if(!f){setMsg("分析",`未找到 ${code} 的日线文件`);return}
+  if(!isEmSource()&&!f){setMsg("分析",`未找到 ${code} 的日线文件`);return}
   setMsg("分析","解析中…");
   const timeframe=$("timeframe").value,unit=TF_UNIT[timeframe];
   const adj=await getAdjustedSeries(key,timeframe,dnum($("d2").value));
