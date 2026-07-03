@@ -223,6 +223,25 @@ test('placebo candidates are ranked once per match before simulation rounds', ()
   assert.deepEqual(Array.from(prepared[0].candidates,x=>x.id),['p1','p2']);
 });
 
+test('mixed benchmark availability uses one absolute-return family', () => {
+  const { api } = loadWorker(HTML);
+  const rows=[{fut:{r5:.1},excess:{r5:.03}},{fut:{r5:.2},excess:{r5:null}}];
+  assert.equal(api.selectReturnFamily(rows,'r5'),'fut');
+});
+
+test('placebo pairing excludes matches without a mature return', () => {
+  const { api } = loadWorker(HTML);
+  const matches=[{key:'a',board:'main',endD:20260101,sd:.02,excess:{r5:.1}},{key:'b',board:'main',endD:20260101,sd:.02,excess:{r5:null}}];
+  const pool=[{id:'p1',key:'c',board:'main',endD:20260101,sd:.02,excess:{r5:.01}},{id:'p2',key:'d',board:'main',endD:20260101,sd:.02,excess:{r5:.02}}];
+  assert.equal(api.placeboSummary(matches,pool,'r5',10,1,'excess').pairedN,1);
+});
+
+test('cache metadata excludes full price arrays', () => {
+  const { api } = loadWorker(HTML);
+  const meta=api.cacheMetaRecord({key:'x',ver:10,lastAccess:2,bytes:9,dates:new ArrayBuffer(8),closes:new ArrayBuffer(8)});
+  assert.deepEqual(JSON.parse(JSON.stringify(meta)),{key:'x',ver:10,lastAccess:2,bytes:9});
+});
+
 test('similarity primitives are stable on edge cases', () => {
   const { api } = loadWorker(HTML);
   assert.deepEqual(Array.from(api.zscore([3, 3, 3])), [0, 0, 0]);

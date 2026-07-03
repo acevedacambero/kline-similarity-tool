@@ -230,9 +230,9 @@ function decodeGbbq(buf,keyB64){
 async function checkRightsContinuity(rights,limit=50){
   const samples=[];
   for(const [code,events] of rights){
-    const entry=[...FILES.entries()].find(([key])=>key.endsWith(code));if(!entry)continue;
+    const f0=FILES.get("sh"+code)||FILES.get("sz"+code)||FILES.get("bj"+code);if(!f0)continue;
     try{
-      const f0=entry[1],f=f0.getFile?await f0.getFile():f0,raw=parseDayBuffer(await f.arrayBuffer());
+      const f=f0.getFile?await f0.getFile():f0,raw=parseDayBuffer(await f.arrayBuffer());
       const adjusted={dates:raw.dates,closes:Float64Array.from(raw.closes),vols:Float64Array.from(raw.vols)};applyCorporateActions(adjusted,events);
       for(const ev of events){
         let i=0;while(i<raw.dates.length&&raw.dates[i]<ev.d)i++;
@@ -341,6 +341,7 @@ function adaptiveCoarseThreshold(base,L){
 function estimateRecordBytes(r){
   return (r.dates?.byteLength||0)+(r.closes?.byteLength||0)+(r.vols?.byteLength||0)+256;
 }
+function cacheMetaRecord(r){return {key:r.key,ver:r.ver,lastAccess:r.lastAccess||0,bytes:r.bytes??estimateRecordBytes(r)}}
 function selectCacheEvictions(records,{ver,maxCount,maxBytes=Infinity,targetRatio=.9}){
   const stale=records.filter(r=>r.ver!==ver).sort((a,b)=>(a.lastAccess||0)-(b.lastAccess||0));
   const live=records.filter(r=>r.ver===ver).sort((a,b)=>(a.lastAccess||0)-(b.lastAccess||0));
@@ -370,26 +371,36 @@ function cacheWriteBackKeys(records,touched,evicted){return records.filter(r=>to
 function rankPlacebos(target,pool){
   return pool.filter(p=>p.key!==target.key).map(p=>({p,rank:[p.board===target.board?0:1,Math.abs(dateOrdinal(p.endD)-dateOrdinal(target.endD)),Math.abs(Math.log((p.sd||1e-9)/(target.sd||1e-9))),p.key,p.endD]})).sort((a,b)=>{for(let i=0;i<a.rank.length;i++){if(a.rank[i]<b.rank[i])return-1;if(a.rank[i]>b.rank[i])return 1}return 0}).map(x=>x.p);
 }
-function selectReturnFamily(rows,horizon){return rows.some(r=>Number.isFinite(r.excess?.[horizon]))?"excess":"fut"}
-function preparePlaceboRankings(matches,pool,horizon,family){
-  return matches.map(match=>({match,candidates:rankPlacebos(match,pool).filter(p=>Number.isFinite(p[family]?.[horizon]))}));
+function selectReturnFamily(rows,horizon){
+  const mature=rows.filter(r=>Number.isFinite(r.fut?.[horizon]));
+  return mature.length&&mature.every(r=>Number.isFinite(r.excess?.[horizon]))?"excess":"fut";
 }
-function placeboSummary(matches,pool,horizon,rounds=200,seed=20260703,family=selectReturnFamily(matches,horizon)){
-  const matchVals=matches.map(m=>m[family]?.[horizon]).filter(Number.isFinite),matchMedian=medianOf(matchVals),matchWin=matchVals.length?matchVals.filter(x=>x>0).length/matchVals.length:null,rnd=seededRandom(seed),roundStats=[];
-  const prepared=preparePlaceboRankings(matches,pool,horizon,family);
+function preparePlaceboRankings(matches,pool){
+  return matches.map(match=>({match,candidates:rankPlacebos(match,pool)}));
+}
+function placeboSummary(matches,pool,horizon,rounds=200,seed=20260703,family=selectReturnFamily(matches,horizon),prepared=null){
+  const eligible=matches.filter(m=>Number.isFinite(m[family]?.[horizon])),matchVals=eligible.map(m=>m[family][horizon]),matchMedian=medianOf(matchVals),matchWin=matchVals.length?matchVals.filter(x=>x>0).length/matchVals.length:null,rnd=seededRandom(seed),roundStats=[];
+  const rankings=(prepared||preparePlaceboRankings(eligible,pool)).filter(x=>Number.isFinite(x.match[family]?.[horizon]));
   for(let r=0;r<rounds;r++){
     const used=new Set(),vals=[];
-    for(const item of prepared){const band=[];for(const p of item.candidates){if(!used.has(p.id)){band.push(p);if(band.length===5)break}}if(!band.length)continue;const p=band[Math.floor(rnd()*band.length)];used.add(p.id);vals.push(p[family][horizon])}
+    for(const item of rankings){const band=[];for(const p of item.candidates){if(Number.isFinite(p[family]?.[horizon])&&!used.has(p.id)){band.push(p);if(band.length===5)break}}if(!band.length)continue;const p=band[Math.floor(rnd()*band.length)];used.add(p.id);vals.push(p[family][horizon])}
     if(vals.length)roundStats.push({n:vals.length,win:vals.filter(x=>x>0).length/vals.length,median:medianOf(vals)});
   }
   return {family,rounds:roundStats.length,pairedN:roundStats.length?Math.round(roundStats.reduce((n,x)=>n+x.n,0)/roundStats.length):0,matchWin,matchMedian,placeboWin:roundStats.length?roundStats.reduce((n,x)=>n+x.win,0)/roundStats.length:null,placeboMedian:roundStats.length?medianOf(roundStats.map(x=>x.median)):null,betterRate:roundStats.length&&matchMedian!==null?roundStats.filter(x=>matchMedian>x.median).length/roundStats.length:null};
+}
+function placeboSummaries(matches,pool,horizons=["r5","r10","r20","r60"],rounds=200,seed=20260703,prepared=null){
+  const rankings=prepared||preparePlaceboRankings(matches,pool),out={};
+  for(const horizon of horizons){const family=selectReturnFamily(matches,horizon);out[horizon]=placeboSummary(matches,pool,horizon,rounds,seed,family,rankings)}return out;
 }
 
 
 function idbOpen(){
   return new Promise((res,rej)=>{
-    const rq=indexedDB.open("kline_tool_v2",2);
-    rq.onupgradeneeded=()=>{if(!rq.result.objectStoreNames.contains("stocks"))rq.result.createObjectStore("stocks",{keyPath:"key"});if(!rq.result.objectStoreNames.contains("meta"))rq.result.createObjectStore("meta",{keyPath:"key"})};
+    const rq=indexedDB.open("kline_tool_v2",3);
+    rq.onupgradeneeded=ev=>{
+      const db=rq.result,tx=rq.transaction,stocks=db.objectStoreNames.contains("stocks")?tx.objectStore("stocks"):db.createObjectStore("stocks",{keyPath:"key"}),meta=db.objectStoreNames.contains("meta")?tx.objectStore("meta"):db.createObjectStore("meta",{keyPath:"key"});
+      if(ev.oldVersion<3){const cur=stocks.openCursor();cur.onsuccess=()=>{const c=cur.result;if(!c)return;meta.put(cacheMetaRecord(c.value));c.continue()}}
+    };
     rq.onsuccess=()=>res(rq.result);
     rq.onerror=()=>rej(rq.error);
   });
@@ -405,17 +416,18 @@ function idbGet(db,key){
 function idbPutBatch(db,recs){
   return new Promise(res=>{
     try{
-      const tx=db.transaction("stocks","readwrite"),st=tx.objectStore("stocks");
-      for(const r of recs)st.put(r);
+      const tx=db.transaction(["stocks","meta"],"readwrite"),st=tx.objectStore("stocks"),meta=tx.objectStore("meta");
+      for(const r of recs){st.put(r);meta.put(cacheMetaRecord(r))}
       tx.oncomplete=()=>res(true);tx.onerror=()=>res(false);tx.onabort=()=>res(false);
     }catch(_){res(false)}
   });
 }
-function idbAll(db){return new Promise(res=>{try{const rq=db.transaction("stocks","readonly").objectStore("stocks").getAll();rq.onsuccess=()=>res(rq.result||[]);rq.onerror=()=>res([])}catch(_){res([])}})}
-function idbDeleteBatch(db,keys){return new Promise(res=>{try{const tx=db.transaction("stocks","readwrite"),st=tx.objectStore("stocks");for(const k of keys)st.delete(k);tx.oncomplete=()=>res(true);tx.onerror=tx.onabort=()=>res(false)}catch(_){res(false)}})}
+function idbMetaAll(db){return new Promise(res=>{try{const rq=db.transaction("meta","readonly").objectStore("meta").getAll();rq.onsuccess=()=>res(rq.result||[]);rq.onerror=()=>res([])}catch(_){res([])}})}
+function idbPutMetaBatch(db,recs){return new Promise(res=>{try{const tx=db.transaction("meta","readwrite"),st=tx.objectStore("meta");for(const r of recs)st.put(r);tx.oncomplete=()=>res(true);tx.onerror=tx.onabort=()=>res(false)}catch(_){res(false)}})}
+function idbDeleteBatch(db,keys){return new Promise(res=>{try{const tx=db.transaction(["stocks","meta"],"readwrite"),st=tx.objectStore("stocks"),meta=tx.objectStore("meta");for(const k of keys){st.delete(k);meta.delete(k)}tx.oncomplete=()=>res(true);tx.onerror=tx.onabort=()=>res(false)}catch(_){res(false)}})}
 async function maintainCache(db){
   if(!db)return {removed:0,count:0,quotaKnown:false};
-  const records=await idbAll(db),now=Date.now(),touched=new Set(CACHE_TOUCHES);
+  const records=await idbMetaAll(db),now=Date.now(),touched=new Set(CACHE_TOUCHES);
   for(const r of records){if(touched.has(r.key))r.lastAccess=now;r.bytes=r.bytes??estimateRecordBytes(r)}
   CACHE_TOUCHES.clear();
   let quota=null;
@@ -423,7 +435,7 @@ async function maintainCache(db){
   const maxBytes=quota===null?Infinity:quota * .2;
   const keys=selectCacheEvictions(records,{ver:ALGO_VER,maxCount:7000,maxBytes,targetRatio:.9}),gone=new Set(keys);
   if(keys.length)await idbDeleteBatch(db,keys);
-  const writeKeys=new Set(cacheWriteBackKeys(records,touched,gone)),writeBack=records.filter(r=>writeKeys.has(r.key));if(writeBack.length)await idbPutBatch(db,writeBack);
+  const writeKeys=new Set(cacheWriteBackKeys(records,touched,gone)),writeBack=records.filter(r=>writeKeys.has(r.key));if(writeBack.length)await idbPutMetaBatch(db,writeBack);
   return {removed:keys.length,count:records.length-keys.length,quotaKnown:quota!==null,maxBytes:Number.isFinite(maxBytes)?maxBytes:null};
 }
 
@@ -731,7 +743,14 @@ async function runMatch(cfg){
       fut:st.fut,benchmark:st.benchmark,excess:st.excess,lagBars:st.lagBars,benchmarkKey:benchmarkKeyFor(c.key),nn:st.nnSmall,futNn:st.futNn,lastD:st.lastD};
   };
   const rows=kept.slice(0,cfg.topN).map(toRow),statRows=dedupeOverlaps(kept,0.7,L).map(toRow),statSummary={};funnel.shown=rows.length;
-  const placebo={};for(const hk of["r5","r10","r20","r60"]){const family=selectReturnFamily(statRows,hk);placebo[hk]=placeboSummary(statRows,placeboPool,hk,200,20260703,family)}
+  post({type:"progress",done:0,total:Math.max(1,statRows.length),phase:"随机基线统计",rate:"",eta:""});await new Promise(r=>setTimeout(r));
+  const placeboRankings=[];
+  for(let i=0;i<statRows.length;i++){
+    if(cancelled){post({type:"cancelled"});return}
+    placeboRankings.push({match:statRows[i],candidates:rankPlacebos(statRows[i],placeboPool)});
+    if(i%2===1){post({type:"progress",done:i+1,total:statRows.length,phase:"随机基线统计",rate:"",eta:""});await new Promise(r=>setTimeout(r))}
+  }
+  const placebo=placeboSummaries(statRows,placeboPool,["r5","r10","r20","r60"],200,20260703,placeboRankings);
   for(const hk of["r5","r10","r20","r60"]){
     const maturity=summarizeHorizon(statRows,hk),family=maturity.excessN?"excess":"fut";
     const clusters=(family==="fut"?clusterHorizonValues(statRows,hk,7):clusterHorizonValues(statRows,hk,7,family)).sort((a,b)=>a-b);
@@ -774,4 +793,4 @@ function packStk(stk,s,e,benchmarkSeries=null){
   return {startD:stk.dates[s],endD:stk.dates[e],win,nnSmall,fut,benchmark,excess,lagBars,futNn:futNn.length>1?Array.from(resample(new Float64Array(futNn),Math.min(60,futNn.length))):[],lastD:stk.lastD};
 }
 self.__KLINE_TEST_API__={version:ALGO_VER,parseDayBuffer,resolveRightsState,corporateActionFactor,applyCorporateActions,
-  aggregateSeries,periodKey,zscore,cosine,dtwDist,zigAmps,alignCommonDates,sliceSeriesByDate,dedupeOverlaps,mergePerStockCandidates,historicalMaxEnd,recentWindowStarts,recentFreshnessCutoff,clusterHorizonValues,bootstrapWinInterval,isCacheValid,adaptiveCoarseThreshold,boardOfKey,benchmarkKeyFor,indexOnOrBefore,benchmarkReturn,excessReturn,medianOf,summarizeHorizon,ratioSimilarity,amplitudeSimilarity,estimateRecordBytes,selectCacheEvictions,cacheWriteBackKeys,validateRightsDiagnostics,validateContinuity,normalizeFunnel,samplePlaceboStarts,rankPlacebos,selectReturnFamily,preparePlaceboRankings,placeboSummary,forwardReturns};
+  aggregateSeries,periodKey,zscore,cosine,dtwDist,zigAmps,alignCommonDates,sliceSeriesByDate,dedupeOverlaps,mergePerStockCandidates,historicalMaxEnd,recentWindowStarts,recentFreshnessCutoff,clusterHorizonValues,bootstrapWinInterval,isCacheValid,adaptiveCoarseThreshold,boardOfKey,benchmarkKeyFor,indexOnOrBefore,benchmarkReturn,excessReturn,medianOf,summarizeHorizon,ratioSimilarity,amplitudeSimilarity,estimateRecordBytes,cacheMetaRecord,selectCacheEvictions,cacheWriteBackKeys,validateRightsDiagnostics,validateContinuity,normalizeFunnel,samplePlaceboStarts,rankPlacebos,selectReturnFamily,preparePlaceboRankings,placeboSummary,placeboSummaries,forwardReturns};
