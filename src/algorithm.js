@@ -1,5 +1,5 @@
 "use strict";
-const ALGO_VER=6;
+const ALGO_VER=8;
 let FILES=null, RIGHTS=new Map(), RIGHTS_STATE={status:"raw",reason:"missing",count:0}, RIGHTS_STAMP="raw", cancelled=false, DB=null;
 
 function zscore(a){
@@ -100,7 +100,10 @@ function applyCorporateActions(series,events){
   let pf=1,vf=1;
   for(let i=dates.length-1;i>=0;i--){
     const f=factors.get(i+1);if(f){pf*=f.p;vf*=f.v}
-    if(pf!==1){closes[i]*=pf;if(opens)opens[i]*=pf;if(highs)highs[i]*=pf;if(lows)lows[i]*=pf}if(vf!==1)vols[i]/=vf;
+    if(pf!==1){closes[i]*=pf;if(opens)opens[i]*=pf;if(highs)highs[i]*=pf;if(lows)lows[i]*=pf}
+    // 前复权价格换算到除权后的新股本口径；成交量必须按相同股本倍数放大。
+    // 对纯送转事件，调整后的“价格 × 成交量”因此仍与原始成交额口径一致。
+    if(vf!==1)vols[i]*=vf;
   }
   return applied;
 }
@@ -109,6 +112,41 @@ function parseDayQfq(buf,key){
   const applied=applyCorporateActions(p,events),ok=RIGHTS_STATE.status==="valid";
   return {...p,warn:!ok,qStatus:ok?"qfq":"raw",rightsStatus:RIGHTS_STATE.status,rightsReason:RIGHTS_STATE.reason,
     qEvents:applied,nBars:p.dates.length,lastD:p.dates.length?p.dates[p.dates.length-1]:0};
+}
+
+function normalizeTimeframe(value){return value==="week"||value==="month"?value:"day"}
+function dateOrdinal(d){const s=String(d);return Math.floor(Date.UTC(+s.slice(0,4),+s.slice(4,6)-1,+s.slice(6,8))/864e5)}
+function periodKey(d,timeframe){
+  if(timeframe==="month")return Math.floor(d/100);
+  if(timeframe==="week"){
+    const s=String(d),dt=new Date(Date.UTC(+s.slice(0,4),+s.slice(4,6)-1,+s.slice(6,8)));
+    return dateOrdinal(d)-((dt.getUTCDay()+6)%7);
+  }
+  return d;
+}
+function aggregateSeries(series,timeframe="day",endD=Infinity){
+  timeframe=normalizeTimeframe(timeframe);
+  if(timeframe==="day"&&endD===Infinity){if(!series.periods)series.periods=series.dates;return series}
+  const dates=[],periods=[],opens=[],highs=[],lows=[],closes=[],amounts=[],vols=[];
+  const hasOHLC=!!series.opens,hasAmount=!!series.amounts;
+  let key=null,o=0,h=0,l=0,c=0,amt=0,v=0,lastD=0;
+  const flush=()=>{
+    if(key===null)return;
+    dates.push(lastD);periods.push(key);closes.push(c);vols.push(v);
+    if(hasOHLC){opens.push(o);highs.push(h);lows.push(l)}
+    if(hasAmount)amounts.push(amt);
+  };
+  for(let i=0;i<series.dates.length;i++){
+    const d=series.dates[i];if(d>endD)break;
+    const next=periodKey(d,timeframe);
+    if(next!==key){flush();key=next;o=hasOHLC?series.opens[i]:0;h=hasOHLC?series.highs[i]:0;l=hasOHLC?series.lows[i]:0;amt=0;v=0}
+    if(hasOHLC){h=Math.max(h,series.highs[i]);l=Math.min(l,series.lows[i])}
+    c=series.closes[i];amt+=hasAmount?series.amounts[i]:0;v+=series.vols[i];lastD=d;
+  }
+  flush();
+  return {...series,dates:Int32Array.from(dates),periods:Int32Array.from(periods),closes:Float64Array.from(closes),vols:Float64Array.from(vols),
+    opens:hasOHLC?Float64Array.from(opens):undefined,highs:hasOHLC?Float64Array.from(highs):undefined,lows:hasOHLC?Float64Array.from(lows):undefined,
+    amounts:hasAmount?Float64Array.from(amounts):undefined,nBars:dates.length,lastD:dates.length?dates[dates.length-1]:0,timeframe};
 }
 
 function decodeGbbq(buf,keyB64){
@@ -181,16 +219,17 @@ function bsearch(dates,d){
 }
 function alignCommonDates(a,b){
   const dates=[],ac=[],av=[],bc=[],bv=[];let i=0,j=0;
-  while(i<a.dates.length&&j<b.dates.length){
-    if(a.dates[i]===b.dates[j]){dates.push(a.dates[i]);ac.push(a.closes[i]);av.push(a.vols[i]);bc.push(b.closes[j]);bv.push(b.vols[j]);i++;j++}
-    else if(a.dates[i]<b.dates[j])i++;else j++;
+  const ak=a.periods||a.dates,bk=b.periods||b.dates;
+  while(i<ak.length&&j<bk.length){
+    if(ak[i]===bk[j]){dates.push(a.dates[i]);ac.push(a.closes[i]);av.push(a.vols[i]);bc.push(b.closes[j]);bv.push(b.vols[j]);i++;j++}
+    else if(ak[i]<bk[j])i++;else j++;
   }
   return {dates:Int32Array.from(dates),aCloses:Float64Array.from(ac),aVols:Float64Array.from(av),bCloses:Float64Array.from(bc),bVols:Float64Array.from(bv)};
 }
 function sliceSeriesByDate(stk,startD,endD){
   let lo=0,hi=stk.dates.length;while(lo<hi){const m=(lo+hi)>>1;if(stk.dates[m]<startD)lo=m+1;else hi=m}const s=lo;
   lo=s;hi=stk.dates.length;while(lo<hi){const m=(lo+hi)>>1;if(stk.dates[m]<=endD)lo=m+1;else hi=m}const e=lo;
-  return {dates:stk.dates.subarray(s,e),closes:stk.closes.subarray(s,e),vols:stk.vols.subarray(s,e)};
+  return {dates:stk.dates.subarray(s,e),periods:stk.periods?stk.periods.subarray(s,e):undefined,closes:stk.closes.subarray(s,e),vols:stk.vols.subarray(s,e)};
 }
 function overlapRatio(a,b,L){return Math.max(0,Math.min(a.e,b.e)-Math.max(a.s,b.s)+1)/L}
 function dedupeOverlaps(rows,threshold,L){
@@ -215,7 +254,6 @@ function recentFreshnessCutoff(dates,refEndIndex,lookback=30){
   return dates[Math.max(0,end-Math.max(0,Math.floor(lookback)))]||0;
 }
 function wilsonInterval(wins,n,z=1.96){if(!n)return null;const p=wins/n,z2=z*z,den=1+z2/n,mid=(p+z2/(2*n))/den,half=z*Math.sqrt(p*(1-p)/n+z2/(4*n*n))/den;return [mid-half,mid+half]}
-function dateOrdinal(d){const s=String(d);return Math.floor(Date.UTC(+s.slice(0,4),+s.slice(4,6)-1,+s.slice(6,8))/864e5)}
 function clusterHorizonValues(rows,horizon,maxGapDays=7){
   const valid=rows.filter(r=>r.fut&&Number.isFinite(r.fut[horizon])).sort((a,b)=>a.endD-b.endD),out=[];let vals=[],anchor=null;
   for(const r of valid){const day=dateOrdinal(r.endD);if(anchor!==null&&day-anchor>maxGapDays){out.push(vals.reduce((a,b)=>a+b,0)/vals.length);vals=[];anchor=day}else if(anchor===null)anchor=day;vals.push(r.fut[horizon])}
@@ -236,14 +274,12 @@ function idbOpen(){
     rq.onerror=()=>rej(rq.error);
   });
 }
-function idbLoadAll(db){
+function idbGet(db,key){
   return new Promise(res=>{
-    const map=new Map();
     try{
-      const tx=db.transaction("stocks","readonly").objectStore("stocks").openCursor();
-      tx.onsuccess=()=>{const c=tx.result;if(c){map.set(c.value.key,c.value);c.continue()}else res(map)};
-      tx.onerror=()=>res(map);
-    }catch(_){res(map)}
+      const rq=db.transaction("stocks","readonly").objectStore("stocks").get(key);
+      rq.onsuccess=()=>res(rq.result||null);rq.onerror=()=>res(null);
+    }catch(_){res(null)}
   });
 }
 function idbPutBatch(db,recs){
@@ -260,7 +296,7 @@ async function getStock(key,cache,pending){
   const f0=FILES.get(key);
   if(!f0)return null;
   const file=f0.getFile?await f0.getFile():f0;
-  const hit=cache.get(key);
+  const hit=cache.get(key)||(DB?await idbGet(DB,key):null);
   if(isCacheValid(hit,file,RIGHTS_STAMP,ALGO_VER)){
     return {dates:new Int32Array(hit.dates),closes:new Float64Array(hit.closes),vols:new Float64Array(hit.vols),warn:hit.warn,qStatus:hit.qStatus,qEvents:hit.qEvents,lastD:hit.lastD};
   }
@@ -304,7 +340,7 @@ self.onmessage=async ev=>{
   if(msg.type==="series"){
     try{
       const f0=FILES.get(msg.key),f=f0.getFile?await f0.getFile():f0;
-      const p=parseDayQfq(await f.arrayBuffer(),msg.key);
+      const p=aggregateSeries(parseDayQfq(await f.arrayBuffer(),msg.key),msg.timeframe,msg.endD||Infinity);
       postMessage({type:"series",reqId:msg.reqId,dates:p.dates,opens:p.opens,highs:p.highs,lows:p.lows,closes:p.closes,amounts:p.amounts,vols:p.vols,
         rejected:p.rejected,qStatus:p.qStatus,qEvents:p.qEvents,rightsStatus:p.rightsStatus,rightsReason:p.rightsReason});
     }catch(err){postMessage({type:"series",reqId:msg.reqId,error:String(err)})}
@@ -319,13 +355,16 @@ self.onmessage=async ev=>{
 
 async function runMatch(cfg){
   if(!DB){try{DB=await idbOpen()}catch(_){DB=null}}
-  const cache=DB?await idbLoadAll(DB):new Map();
+  // 缓存按证券惰性读取，避免把全市场历史数组一次性反序列化进内存。
+  const cache=new Map();
   const pending=[];
   const post=o=>postMessage(o);
 
   const refKey=cfg.refKey;
-  const refStk=await getStock(refKey,cache,pending);
-  if(!refStk){post({type:"error",msg:"未找到参考股票数据"});return}
+  const timeframe=normalizeTimeframe(cfg.timeframe);
+  const refDaily=await getStock(refKey,cache,pending);
+  if(!refDaily){post({type:"error",msg:"未找到参考股票数据"});return}
+  const refStk=aggregateSeries(refDaily,timeframe,cfg.d2);
   refStk.ma20=ma20Arr(refStk.closes);
   let rs=-1,re=-1;
   for(let i=0;i<refStk.dates.length;i++){
@@ -333,7 +372,8 @@ async function runMatch(cfg){
     if(d>=cfg.d1&&rs<0)rs=i;
     if(d<=cfg.d2)re=i;
   }
-  if(rs<0||re<=rs||re-rs<15){post({type:"error",msg:"参考区间内数据不足"});return}
+  const minPeriods=timeframe==="day"?16:8;
+  if(rs<0||re<=rs||re-rs+1<minPeriods){post({type:"error",msg:`参考区间内${timeframe==="month"?"月线":timeframe==="week"?"周线":"日线"}不足${minPeriods}个周期`});return}
   const L=re-rs+1;
   const R={
     zcum:zscore(logSlice(refStk.closes,rs,re)),
@@ -376,7 +416,8 @@ async function runMatch(cfg){
   const coarse=[];
   const scratch=new Float64Array(32);
   const mode=cfg.mode;
-  const recentCutoff=mode==="recent"?recentFreshnessCutoff(refStk.dates,re,30):0;
+  const freshnessBars=timeframe==="month"?2:timeframe==="week"?6:30;
+  const recentCutoff=mode==="recent"?recentFreshnessCutoff(refStk.dates,re,freshnessBars):0;
   const effectiveRecentBars=mode==="recent"?Math.max(L,Number.isFinite(cfg.recentBars)?Math.floor(cfg.recentBars):L):null;
   let done=0,skipped=0;const skipReasons={},skipDetails=[];
   const skip=(reason,key,err)=>{skipped++;skipReasons[reason]=(skipReasons[reason]||0)+1;if(err&&skipDetails.length<8)skipDetails.push({key,reason,error:String(err&&err.message||err)})};
@@ -391,16 +432,17 @@ async function runMatch(cfg){
       await new Promise(r=>setTimeout(r));
     }
     try{
-      const stk=await getStock(key,cache,pending);
-      if(!stk){skip("无数据",key);continue}
+      const daily=await getStock(key,cache,pending);
+      if(!daily){skip("无数据",key);continue}
+      const stk=aggregateSeries(daily,timeframe);
       const n=stk.dates.length;
-      if(cfg.exNew&&n<120){skip("上市不足120日",key);continue}
+      if(cfg.exNew&&daily.dates.length<120){skip("上市不足120日",key);continue}
       if(mode==="recent"&&stk.dates[n-1]<recentCutoff){skip("最后交易日过早",key);continue}
       if(pending.length>=200&&DB){await idbPutBatch(DB,pending.splice(0))}
 
       if(mode==="peer"){
         if(key===refKey)continue;
-        const refWin={dates:refStk.dates.subarray(rs,re+1),closes:refStk.closes.subarray(rs,re+1),vols:refStk.vols.subarray(rs,re+1)};
+        const refWin={dates:refStk.dates.subarray(rs,re+1),periods:refStk.periods?refStk.periods.subarray(rs,re+1):undefined,closes:refStk.closes.subarray(rs,re+1),vols:refStk.vols.subarray(rs,re+1)};
         const peerSlice=sliceSeriesByDate(stk,refStartD,refEndD);
         const al=alignCommonDates(refWin,peerSlice);
         if(al.dates.length<L*0.95){skip("同期共同交易日不足",key);continue}
@@ -510,7 +552,7 @@ async function runMatch(cfg){
   };
   const rows=kept.map(toRow),statRows=dedupeOverlaps(kept,0.7,L).map(toRow),statSummary={};
   for(const hk of["r5","r10","r20","r60"]){const raw=statRows.map(r=>r.fut[hk]).filter(Number.isFinite),clusters=clusterHorizonValues(statRows,hk,7).sort((a,b)=>a-b);statSummary[hk]={rawN:raw.length,periodN:clusters.length,win:clusters.length?clusters.filter(x=>x>0).length/clusters.length:null,interval:bootstrapWinInterval(clusters),median:clusters.length?clusters[Math.floor(clusters.length/2)]:null}}
-  post({type:"result",rows,statRows,meta:{mode,recentBars:effectiveRecentBars,scanned:total,skipped,skipReasons,skipDetails,settings:{preset:cfg.preset||"custom",coarseThreshold,K_COARSE,K_DTW,dtwBand},statSummary,L,refStartD,refEndD,elapsed:((Date.now()-t0)/1000).toFixed(1),
+  post({type:"result",rows,statRows,meta:{mode,timeframe,recentBars:effectiveRecentBars,scanned:total,skipped,skipReasons,skipDetails,settings:{preset:cfg.preset||"custom",coarseThreshold,K_COARSE,K_DTW,dtwBand},statSummary,L,refStartD,refEndD,elapsed:((Date.now()-t0)/1000).toFixed(1),
     refWarn:refStk.warn,candidates:coarse.length,refNn:Array.from(resample(refStk.closes.subarray(rs,re+1),120)).map(x=>x/refStk.closes[rs])}});
 }
 
@@ -550,4 +592,4 @@ function packStk(stk,s,e){
   return {startD:stk.dates[s],endD:stk.dates[e],win,nnSmall,fut,futNn:futNn.length>1?Array.from(resample(new Float64Array(futNn),Math.min(60,futNn.length))):[],lastD:stk.lastD};
 }
 self.__KLINE_TEST_API__={version:ALGO_VER,parseDayBuffer,resolveRightsState,corporateActionFactor,applyCorporateActions,
-  zscore,cosine,dtwDist,zigAmps,alignCommonDates,sliceSeriesByDate,dedupeOverlaps,mergePerStockCandidates,historicalMaxEnd,recentWindowStarts,recentFreshnessCutoff,wilsonInterval,clusterHorizonValues,bootstrapWinInterval,isCacheValid};
+  aggregateSeries,periodKey,zscore,cosine,dtwDist,zigAmps,alignCommonDates,sliceSeriesByDate,dedupeOverlaps,mergePerStockCandidates,historicalMaxEnd,recentWindowStarts,recentFreshnessCutoff,wilsonInterval,clusterHorizonValues,bootstrapWinInterval,isCacheValid};

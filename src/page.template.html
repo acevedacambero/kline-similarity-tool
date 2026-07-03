@@ -69,6 +69,7 @@ details summary{cursor:pointer;font-size:13px;color:#2a78d6;margin-top:8px}
     <div class="ctl"><label>股票代码（支持名称联想）</label><input type="text" id="code" value="301377" list="codeList" placeholder="如 301377"><datalist id="codeList"></datalist></div>
     <div class="ctl"><label>开始日期</label><input type="date" id="d1" value="2025-12-01"></div>
     <div class="ctl"><label>结束日期 <span id="quickBtns"><button class="mini sec" data-n="20">20日</button><button class="mini sec" data-n="60">60日</button><button class="mini sec" data-n="120">120日</button><button class="mini sec" data-n="250">250日</button></span></label><input type="date" id="d2" value="2026-05-20"></div>
+    <div class="ctl"><label>数据周期</label><select id="timeframe"><option value="day" selected>日线</option><option value="week">周线</option><option value="month">月线</option></select></div>
     <div class="ctl"><label>波段阈值</label><select id="zz"><option value="0.06">6%</option><option value="0.08" selected>8%</option><option value="0.10">10%</option><option value="0.12">12%</option></select></div>
     <div class="ctl"><button id="btnA" disabled>① 分析该股</button></div>
     <div class="ctl"><button id="btnM" disabled>② 匹配相似</button></div>
@@ -81,7 +82,7 @@ details summary{cursor:pointer;font-size:13px;color:#2a78d6;margin-top:8px}
       <label class="chip"><input type="radio" name="mode" value="peer">同期联动（同区间谁和它最像）</label>
     </span>
     <span class="chip">滑窗步长<select id="step"><option value="2">2</option><option value="3" selected>3</option><option value="5">5</option></select></span>
-    <span class="chip">近期范围<input type="number" id="recentBars" min="15" max="5000" placeholder="自动" disabled>交易日</span>
+    <span class="chip">近期范围<input type="number" id="recentBars" min="8" max="5000" placeholder="自动" disabled>个周期</span>
     <span class="chip"><label class="chip"><input type="checkbox" id="isolate" checked>防前视：仅匹配目标区间之前的历史</label></span>
     <span class="chip">每股上限<select id="perStock"><option value="1">1</option><option value="2" selected>2</option><option value="3">3</option></select></span>
     <span class="chip">展示前<select id="topN"><option value="30">30</option><option value="50" selected>50</option><option value="100">100</option></select>名</span>
@@ -153,7 +154,7 @@ details summary{cursor:pointer;font-size:13px;color:#2a78d6;margin-top:8px}
 <script>
 "use strict";
 const $=id=>document.getElementById(id);
-const UI_ALGO_VER=6;
+const UI_ALGO_VER=8;
 let files=new Map(), names={}, gbbqFile=null, rightsOK=false, rightsState="raw", ref=null, worker=null, lastRows=null, lastStatRows=null, lastMeta=null, referenceDates=null, sortKey="score", sortAsc=false;
 let seriesSeq=0;const seriesWait=new Map();
 
@@ -259,15 +260,16 @@ async function initWorker(){
   worker.postMessage({type:"files",entries:[...files.entries()],gbbq,keyB64:$("gbbqKey").textContent.trim(),rightsStamp});
 }
 
-function getAdjustedSeries(key){
+function getAdjustedSeries(key,timeframe="day",endD=null){
   if(!worker)return Promise.resolve(null);
-  return new Promise(resolve=>{const reqId=++seriesSeq;seriesWait.set(reqId,resolve);worker.postMessage({type:"series",reqId,key})});
+  return new Promise(resolve=>{const reqId=++seriesSeq;seriesWait.set(reqId,resolve);worker.postMessage({type:"series",reqId,key,timeframe,endD})});
 }
 
 function keyOf(code){return (code.startsWith("6")||code.startsWith("5")?"sh":/^(43|83|87|92)/.test(code)?"bj":"sz")+code}
 const dnum=s=>parseInt(s.replace(/-/g,""),10);
 const fmtD=d=>String(d).replace(/^(\d{4})(\d{2})(\d{2})$/,"$1/$2/$3");
 const pct=x=>x===null||x===undefined?"—":(x*100).toFixed(1)+"%";
+const TF_LABEL={day:"日线",week:"周线",month:"月线"},TF_UNIT={day:"日",week:"周",month:"月"};
 function lastIndexOnOrBefore(dates,target){
   let lo=0,hi=dates.length-1,ans=-1;while(lo<=hi){const m=(lo+hi)>>1;if(dates[m]<=target){ans=m;lo=m+1}else hi=m-1}return ans;
 }
@@ -277,10 +279,18 @@ function syncModeControls(){
   const mode=document.querySelector('input[name=mode]:checked').value,isHist=mode==="hist",isRecent=mode==="recent";
   if(isHist)$("isolate").checked=savedIsolate;else savedIsolate=$("isolate").checked;
   $("isolate").disabled=!isHist;$("recentBars").disabled=!isRecent;
-  if(isRecent)setMsg("模式",`近期模式按每只证券最新数据向前搜索；近期范围留空时自动等于目标区间交易日数。`);
+  if(isRecent)setMsg("模式",`近期模式按每只证券最新数据向前搜索；近期范围留空时自动等于目标区间周期数。`);
 }
 document.querySelectorAll('input[name=mode]').forEach(r=>r.addEventListener("change",syncModeControls));
 syncModeControls();
+function syncTimeframe(){
+  const tf=$("timeframe").value,unit=TF_UNIT[tf];
+  $("quickBtns").querySelectorAll("button[data-n]").forEach(b=>b.textContent=b.dataset.n+unit);
+  ref=null;referenceDates=null;lastChart=null;lastRows=null;lastMeta=null;
+  $("refPanel").style.display="none";$("matchPanel").style.display="none";
+  setMsg("周期",`已切换为${TF_LABEL[tf]}，请重新分析目标股票。`);
+}
+$("timeframe").addEventListener("change",syncTimeframe);
 const MATCH_PRESETS={stable:{coarseTh:.82,coarseLimit:400,dtwLimit:120,dtwBand:5},balanced:{coarseTh:.75,coarseLimit:600,dtwLimit:200,dtwBand:6},loose:{coarseTh:.65,coarseLimit:900,dtwLimit:300,dtwBand:8}};
 $("matchPreset").addEventListener("change",()=>{const p=MATCH_PRESETS[$("matchPreset").value];for(const[k,v]of Object.entries(p))$(k).value=v});
 
@@ -290,9 +300,10 @@ $("quickBtns").addEventListener("click",e=>{
   e.preventDefault();
   if(referenceDates&&referenceDates.length){
     const end=dnum($("d2").value),ei=lastIndexOnOrBefore(referenceDates,end);
-    if(ei>=0){const d=String(referenceDates[Math.max(0,ei-parseInt(n)+1)]);$("d1").value=d.slice(0,4)+"-"+d.slice(4,6)+"-"+d.slice(6);setMsg("区间",`已按实际交易日回推 ${n} 日。`);return}
+    if(ei>=0){const d=String(referenceDates[Math.max(0,ei-parseInt(n)+1)]);$("d1").value=d.slice(0,4)+"-"+d.slice(4,6)+"-"+d.slice(6);setMsg("区间",`已按实际${TF_LABEL[$("timeframe").value]}回推 ${n} 个周期。`);return}
   }
-  const d2=new Date($("d2").value||new Date()),d1=new Date(d2.getTime()-n*1.45*864e5);
+  const tf=$("timeframe").value,days=tf==="month"?n*30.5:tf==="week"?n*7:n*1.45;
+  const d2=new Date($("d2").value||new Date()),d1=new Date(d2.getTime()-days*864e5);
   $("d1").value=d1.toISOString().slice(0,10);setMsg("区间","参考股票尚未载入，当前为自然日近似区间。");
 });
 
@@ -315,20 +326,22 @@ async function analyze(code){
   const key=keyOf(code),f=files.get(key);
   if(!f){setMsg("分析",`未找到 ${code} 的日线文件`);return}
   setMsg("分析","解析中…");
-  const adj=await getAdjustedSeries(key);
+  const timeframe=$("timeframe").value,unit=TF_UNIT[timeframe];
+  const adj=await getAdjustedSeries(key,timeframe,dnum($("d2").value));
   if(!adj||adj.error||!adj.dates){setMsg("分析","解析失败："+(adj&&adj.error||"Worker 未返回数据"));return}
   const rows=Array.from(adj.dates,(d,i)=>({d,o:adj.opens[i],h:adj.highs[i],l:adj.lows[i],c:adj.closes[i],amt:adj.amounts[i],v:adj.vols[i]}));
   referenceDates=rows.map(r=>r.d);
   const qStatus=adj.qStatus||"raw",qEvents=adj.qEvents||0;
   const D1=dnum($("d1").value),D2=dnum($("d2").value);
   const idx=[];rows.forEach((r,i)=>{if(r.d>=D1&&r.d<=D2)idx.push(i)});
-  if(idx.length<10){setMsg("分析","区间内数据不足10天");return}
+  const minPeriods=timeframe==="day"?16:8;
+  if(idx.length<minPeriods){setMsg("分析",`区间内${TF_LABEL[timeframe]}不足${minPeriods}个周期`);return}
   const s=idx[0],e=idx[idx.length-1],bars=rows.slice(s,e+1);
   const closes=rows.map(r=>r.c);
   const ma=(i,n)=>{if(i<n-1)return null;let t=0;for(let j=i-n+1;j<=i;j++)t+=closes[j];return t/n};
   ref={code,key};
   $("refPanel").style.display="block";
-  $("refTitle").textContent=`${code} ${names[key]||""}  ${fmtD(bars[0].d)} — ${fmtD(bars[bars.length-1].d)}（${bars.length}个交易日）· 数据截至 ${fmtD(rows[rows.length-1].d)} · ${qStatus==="qfq"?`真实权息前复权（应用${qEvents}次）`:"⚠ 未复权（未读取到gbbq）"}`;
+  $("refTitle").textContent=`${code} ${names[key]||""}  ${fmtD(bars[0].d)} — ${fmtD(bars[bars.length-1].d)}（${bars.length}个${unit}线周期）· 数据截至 ${fmtD(rows[rows.length-1].d)} · ${qStatus==="qfq"?`真实权息前复权（应用${qEvents}次）`:"⚠ 未复权（未读取到gbbq）"}`;
 
   const prev=s>0?rows[s-1].c:bars[0].o;
   const hi=Math.max(...bars.map(b=>b.h)),lo=Math.min(...bars.map(b=>b.l));
@@ -383,7 +396,7 @@ async function analyze(code){
   }
 
   $("vpStats").textContent="";
-  for(const x of[["上涨日",upN+"天，均量"+(upN?(upV/upN/1e4).toFixed(0):0)+"万股"],["下跌日",dnN+"天，均量"+(dnN?(dnV/dnN/1e4).toFixed(0):0)+"万股"],
+  for(const x of[[`上涨${unit}`,upN+`个周期，均量`+(upN?(upV/upN/1e4).toFixed(0):0)+"万股"],[`下跌${unit}`,dnN+`个周期，均量`+(dnN?(dnV/dnN/1e4).toFixed(0):0)+"万股"],
     ["量价配合","涨/跌均量比 "+vp.toFixed(2)+(vp>1.2?"（涨放跌缩，健康）":vp<0.85?"（跌放涨缩，警惕）":"（中性）")]]){
     const div=document.createElement("div");div.className="stat";
     const k=document.createElement("div");k.className="k";k.textContent=x[0];
@@ -393,7 +406,7 @@ async function analyze(code){
 
   lastChart={bars,maAt:i=>({5:ma(s+i,5),10:ma(s+i,10),20:ma(s+i,20),60:ma(s+i,60)})};
   drawChart();
-  setMsg("分析","完成。可点击 ② 匹配相似。");
+  setMsg("分析",`${TF_LABEL[timeframe]}分析完成。可点击 ② 匹配相似。`);
 }
 
 function addRow(tbl,cells,isHead){
@@ -470,10 +483,11 @@ $("btnM").onclick=()=>{
   if($("fSt").checked)for(const k in names)if(/ST/i.test(names[k]))stKeys.push(k);
   const cfg={
     refKey:keyOf(code),d1:dnum($("d1").value),d2:dnum($("d2").value),
+    timeframe:$("timeframe").value,
     zzth:parseFloat($("zz").value),
     mode:document.querySelector('input[name=mode]:checked').value,
     step:parseInt($("step").value),isolate:$("isolate").checked,
-    recentBars:$("recentBars").value===""?null:Math.min(5000,Math.max(15,parseInt($("recentBars").value))),
+    recentBars:$("recentBars").value===""?null:Math.min(5000,Math.max(8,parseInt($("recentBars").value))),
     preset:$("matchPreset").value,
     coarseThreshold:Math.min(.95,Math.max(.3,parseFloat($("coarseTh").value)||.75)),
     coarseLimit:Math.min(2000,Math.max(50,parseInt($("coarseLimit").value)||600)),dtwLimit:Math.min(1000,Math.max(20,parseInt($("dtwLimit").value)||200)),
@@ -523,14 +537,15 @@ function renderResults(){
   const statRows=lastStatRows||rows;
   $("matchPanel").style.display="block";
   const modeTxt=meta.mode==="hist"?"历史滑窗搜索":meta.mode==="recent"?"近期相似区间":"同期联动";
-  $("matchTitle").textContent=`匹配结果 · ${modeTxt} · 窗口${meta.L}个交易日${meta.mode==="recent"?` · 近期范围${meta.recentBars}日`:""} · 扫描${meta.scanned}只 · 跳过${meta.skipped||0}只 · 耗时${meta.elapsed}秒`+(meta.refWarn?" · ⚠未复权":" · 真实权息前复权");
+  const timeframe=meta.timeframe||"day",unit=TF_UNIT[timeframe];
+  $("matchTitle").textContent=`匹配结果 · ${TF_LABEL[timeframe]} · ${modeTxt} · 窗口${meta.L}个${unit}线周期${meta.mode==="recent"?` · 近期范围${meta.recentBars}个周期`:""} · 扫描${meta.scanned}只 · 跳过${meta.skipped||0}只 · 耗时${meta.elapsed}秒`+(meta.refWarn?" · ⚠未复权":" · 真实权息前复权");
   if(!rows.length){
     $("btStats").textContent="";$("matchTable").querySelector("tbody").textContent="";
     $("btNote").textContent=`没有找到符合条件的匹配。可尝试：缩短窗口（形态更通用）、关闭防前视限制、放宽市场范围、或降低粗筛门槛（当前要求32点形态余弦>${meta.settings.coarseThreshold.toFixed(2)}）。`;
     setMsg("匹配","完成，但无匹配结果。");return;
   }
   const bt=$("btStats");bt.textContent="";
-  const horizons=[["r5","5日后"],["r10","10日后"],["r20","20日后"],["r60","60日后"]];
+  const horizons=[["r5",`5${unit}后`],["r10",`10${unit}后`],["r20",`20${unit}后`],["r60",`60${unit}后`]];
   for(const[hk,label]of horizons){
     const summary=meta.statSummary[hk];
     const div=document.createElement("div");div.className="stat";
@@ -550,7 +565,7 @@ function renderResults(){
   const thead=$("matchTable").querySelector("thead");thead.textContent="";
   const cols=[["idx","#",false],["key","代码",true],["name","名称",false],["range","匹配区间",true],["nn","走势",false],
     ["score","综合分",true],["cum","累计走势",true],["ret","收益序列",true],["zig","拐点",true],["ma","均线",true],["vol","量能",true],["dtw","DTW",true],
-    ["r5","+5日",true],["r10","+10日",true],["r20","+20日",true],["r60","+60日",true],["maxUp","60日最大涨",true],["maxDn","60日最大回撤",true]];
+    ["r5",`+5${unit}`,true],["r10",`+10${unit}`,true],["r20",`+20${unit}`,true],["r60",`+60${unit}`,true],["maxUp",`60${unit}最大涨`,true],["maxDn",`60${unit}最大回撤`,true]];
   const trh=document.createElement("tr");
   for(const[k2,label,sortable]of cols){
     const th=document.createElement("th");th.textContent=label;
@@ -606,7 +621,8 @@ let lastOverlay=null;
 function showOverlay(r){
   lastOverlay=r;
   $("overlayBox").style.display="block";
-  $("ovTitle").textContent=`走势叠加：${$("code").value} vs ${r.key.slice(2)} ${names[r.key]||""}（${fmtD(r.startD)}~${fmtD(r.endD)}，其后60日虚线）`;
+  const unit=TF_UNIT[lastMeta&&lastMeta.timeframe||"day"];
+  $("ovTitle").textContent=`走势叠加：${$("code").value} vs ${r.key.slice(2)} ${names[r.key]||""}（${fmtD(r.startD)}~${fmtD(r.endD)}，其后60${unit}虚线）`;
   drawOverlay(r);
   $("overlayBox").scrollIntoView({behavior:"smooth",block:"nearest"});
 }
@@ -653,10 +669,10 @@ function drawOverlay(r){
 
 $("btnCsv").onclick=()=>{
   if(!lastRows)return;
-  const head=["代码","名称","开始","结束","模式","近期范围","综合分","累计走势","收益序列","拐点","均线","量能","DTW","复权存疑","权息状态","统计样本","算法版本","粗筛阈值","粗筛候选","DTW候选","DTW带宽","跳过原因","r5","r10","r20","r60","max60涨","max60撤"];
+  const head=["代码","名称","开始","结束","模式","周期","近期范围","综合分","累计走势","收益序列","拐点","均线","量能","DTW","复权存疑","权息状态","统计样本","算法版本","粗筛阈值","粗筛候选","DTW候选","DTW带宽","跳过原因","r5","r10","r20","r60","max60涨","max60撤"];
   const lines=[head.join(",")];
   lastRows.forEach((r,i)=>{
-    lines.push([r.key.slice(2),(names[r.key]||"").replace(/,/g,""),r.startD,r.endD,lastMeta.mode,lastMeta.recentBars??"",r.score.toFixed(4),
+    lines.push([r.key.slice(2),(names[r.key]||"").replace(/,/g,""),r.startD,r.endD,lastMeta.mode,lastMeta.timeframe||"day",lastMeta.recentBars??"",r.score.toFixed(4),
       r.sub.cum.toFixed(3),r.sub.ret.toFixed(3),r.sub.zig.toFixed(3),r.sub.ma.toFixed(3),r.sub.vol.toFixed(3),
       r.sub.dtw!==undefined?r.sub.dtw.toFixed(3):"",r.warn?1:0,rightsState,lastStatRows&&lastStatRows.includes(r)?1:0,UI_ALGO_VER,
       lastMeta.settings.coarseThreshold,lastMeta.settings.K_COARSE,lastMeta.settings.K_DTW,lastMeta.settings.dtwBand,Object.entries(lastMeta.skipReasons||{}).map(([k,n])=>k+":"+n).join(";"),
@@ -666,7 +682,7 @@ $("btnCsv").onclick=()=>{
   const blob=new Blob(["﻿"+lines.join("\r\n")],{type:"text/csv"});
   const a=document.createElement("a");
   a.href=URL.createObjectURL(blob);
-  a.download="相似匹配_"+$("code").value+"_"+$("d1").value+"_"+$("d2").value+".csv";
+  a.download="相似匹配_"+$("code").value+"_"+(lastMeta.timeframe||"day")+"_"+$("d1").value+"_"+$("d2").value+".csv";
   a.click();
 };
 </script>

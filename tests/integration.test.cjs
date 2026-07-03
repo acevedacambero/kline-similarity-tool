@@ -69,9 +69,10 @@ test('recent mode uses bounded windows and returns actual range', () => {
   assert.match(html, /recentBars:effectiveRecentBars/);
 });
 
-test('recent mode excludes securities stale by more than 30 reference trading days', () => {
+test('recent mode excludes stale securities using timeframe-aware freshness', () => {
   const html = fs.readFileSync(HTML_PATH, 'utf8');
-  assert.match(html, /recentFreshnessCutoff\(refStk\.dates,re,30\)/);
+  assert.match(html, /freshnessBars=timeframe==="month"\?2:timeframe==="week"\?6:30/);
+  assert.match(html, /recentFreshnessCutoff\(refStk\.dates,re,freshnessBars\)/);
   assert.match(html, /mode==="recent"&&stk\.dates\[n-1\]<recentCutoff/);
 });
 
@@ -133,4 +134,22 @@ test('single-file artifacts are generated from a page template and algorithm sou
   assert.equal(fs.existsSync(path.join(root, 'scripts', 'build.cjs')), true);
   const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
   assert.equal(pkg.scripts.build, 'node scripts/build.cjs');
+});
+
+test('IndexedDB cache is read lazily per security', () => {
+  const html = fs.readFileSync(HTML_PATH, 'utf8');
+  assert.match(html, /function idbGet\(db,key\)/);
+  assert.match(html, /DB\?await idbGet\(DB,key\):null/);
+  assert.doesNotMatch(html, /function idbLoadAll\(/);
+});
+
+test('daily weekly and monthly matching use one canonical timeframe pipeline', () => {
+  const html = fs.readFileSync(HTML_PATH, 'utf8');
+  assert.match(html, /id="timeframe"/);
+  assert.match(html, /<option value="week">周线<\/option>/);
+  assert.match(html, /<option value="month">月线<\/option>/);
+  assert.match(html, /timeframe:\$\("timeframe"\)\.value/);
+  assert.match(html, /aggregateSeries\(refDaily,timeframe,cfg\.d2\)/);
+  assert.match(html, /aggregateSeries\(daily,timeframe\)/);
+  assert.match(html, /meta:\{mode,timeframe,recentBars/);
 });
