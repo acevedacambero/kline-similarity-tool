@@ -618,10 +618,11 @@ function renderResults(){
     }else{k.textContent=label;v.textContent="样本不足"}
     div.append(k,v);bt.appendChild(div);
   }
-  {const p=meta.placebo?.r20,div=document.createElement("div");div.className="stat";const k=document.createElement("div");k.className="k";k.textContent="随机基线（200轮）";const v=document.createElement("div");v.className="v";v.style.fontSize="15px";v.textContent=p&&p.rounds?`20${unit}：匹配中位${pct(p.matchMedian)}，随机中位${pct(p.placeboMedian)}；优于随机${(p.betterRate*100).toFixed(0)}%轮（配对${p.pairedN}）`:"可配对样本不足";div.append(k,v);bt.appendChild(div)}
+  {const p=meta.placebo?.r20,div=document.createElement("div");div.className="stat";const k=document.createElement("div");k.className="k";k.textContent="随机基线（200轮）";const v=document.createElement("div");v.className="v";v.style.fontSize="15px";const kind=p?.family==="excess"?"超额":"绝对";v.textContent=p&&p.rounds?`20${unit}${kind}收益：匹配中位${pct(p.matchMedian)}，随机中位${pct(p.placeboMedian)}；优于随机${(p.betterRate*100).toFixed(0)}%轮（配对${p.pairedN}）`:"可配对样本不足";div.append(k,v);bt.appendChild(div)}
   const topSkips=Object.entries(meta.skipReasons||{}).sort((a,b)=>b[1]-a[1]).slice(0,3).map(([k,n])=>`${k}${n}只`).join("、");
   const passRate=f.windows?f.coarsePassed/f.windows:0,thresholdHint=passRate<.001?"粗筛通过率很低，可考虑降低门槛。":passRate>.20?"粗筛通过率很高，可考虑提高门槛。":"";
-  $("btNote").textContent="注意：有本地指数时默认显示超额簇级胜率；统计先做同股重叠去重，再按相近结束日期聚类并计算Bootstrap区间。"+thresholdHint+(topSkips?`主要淘汰：${topSkips}。`:"")+(meta.mode==="hist"?"已"+(rows.some(r=>r.endD>=meta.refStartD)?"关闭":"启用")+"防前视隔离。":meta.mode==="recent"?"近期模式用于寻找当前或近期形态，不等价于历史回测；最新窗口通常没有完整未来收益。":"同期模式下\"未来收益\"为目标区间结束后的实际走势。");
+  const benchmarkWarning=meta.benchmark?.missingBenchmarkKeys?.length?`缺少本地指数 ${meta.benchmark.missingBenchmarkKeys.join("、")}，对应样本展示绝对收益。`:"";
+  $("btNote").textContent="注意：有本地指数时默认显示超额簇级胜率；"+benchmarkWarning+"统计先做同股重叠去重，再按相近结束日期聚类并计算Bootstrap区间。"+thresholdHint+(topSkips?`主要淘汰：${topSkips}。`:"")+(meta.mode==="hist"?"已"+(rows.some(r=>r.endD>=meta.refStartD)?"关闭":"启用")+"防前视隔离。":meta.mode==="recent"?"近期模式用于寻找当前或近期形态，不等价于历史回测；最新窗口通常没有完整未来收益。":"同期模式下\"未来收益\"为目标区间结束后的实际走势。");
 
   const thead=$("matchTable").querySelector("thead");thead.textContent="";
   const cols=[["idx","#",false],["key","代码",true],["name","名称",false],["range","匹配区间",true],["nn","走势",false],
