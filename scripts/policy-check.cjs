@@ -16,7 +16,7 @@ if (sha(html) !== sha(publicHtml)) throw new Error('public/index.html is not syn
 const scripts = [...html.matchAll(/<script(?:[^>]*)>([\s\S]*?)<\/script>/g)];
 if (scripts.length !== 3) throw new Error(`Expected 3 script blocks, found ${scripts.length}`);
 for (const index of [1, 2]) new Function(scripts[index][1]);
-for (const id of ['dir', 'btnA', 'btnM', 'matchTable', 'workerSrc', 'dataSource']) {
+for (const id of ['dir', 'btnA', 'btnM', 'matchTable', 'workerSrc']) {
   if (!html.includes(`id="${id}"`)) throw new Error(`Missing HTML element: ${id}`);
 }
 

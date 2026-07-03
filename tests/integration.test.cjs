@@ -29,9 +29,12 @@ test('UI analysis consumes the canonical worker OHLC series', () => {
   assert.match(html, /const rows=Array\.from\(adj\.dates/);
 });
 
-test('Eastmoney analysis does not require a TongdaXin day file', () => {
+test('TongdaXin is the only local data source and legacy Eastmoney cache is removed', () => {
   const html = fs.readFileSync(HTML_PATH, 'utf8');
-  assert.match(html, /if\(!isEmSource\(\)&&!f\)/);
+  assert.doesNotMatch(html, /id="dataSource"|东方财富|SOURCE==="em"|emReady|scanEmRoot/);
+  assert.match(html, /function cleanupLegacyEastmoneyCache\(/);
+  assert.match(html, /key\.startsWith\("em:"\)/);
+  assert.match(html, /cleanupLegacyEastmoneyCache\(\)/);
 });
 
 test('result protocol contains effective statistical samples', () => {
@@ -184,32 +187,6 @@ test('daily weekly and monthly matching use one canonical timeframe pipeline', (
   assert.match(html, /aggregateSeries\(refDaily,timeframe,cfg\.d2\)/);
   assert.match(html, /aggregateSeries\(daily,timeframe\)/);
   assert.match(html, /meta:\{mode,timeframe,recentBars/);
-});
-
-test('Eastmoney local data source is selectable and wired end to end', () => {
-  const html = fs.readFileSync(HTML_PATH, 'utf8');
-  assert.match(html, /id="dataSource"/);
-  assert.match(html, /<option value="em">\u4e1c\u65b9\u8d22\u5bcc<\/option>|<option value="em">东方财富<\/option>/);
-  assert.match(html, /sqliteScanTable\(buf,"dists_day_bar",9/);
-  assert.match(html, /sqliteScanTable\(buf,"dists_instrument",12/);
-  assert.match(html, /"em:__meta__"/);
-  assert.match(html, /type:"emReady"/);
-  assert.match(html, /async function scanEmRoot\(/);
-  assert.match(html, /StkQuoteList_V/);
-  assert.match(html, /SOURCE==="em"/);
-  assert.match(html, /source:"em"/);
-  assert.match(html, /emApplyFactors\(/);
-});
-
-test('Eastmoney first-load pipeline bounds peak memory and releases the full store', () => {
-  const html = fs.readFileSync(HTML_PATH, 'utf8');
-  const instrument = html.indexOf('for(const f of EM_FILES.instrument)');
-  const dayBar = html.indexOf('for(const f of EM_FILES.dayBar)');
-  assert.ok(instrument >= 0 && dayBar > instrument, 'instrument factors should be scanned before day bars');
-  assert.match(html, /parseEmNames\(\[new Uint8Array\(await emFileBuf\(f\)\)\]\)/);
-  assert.match(html, /acc\.delete\(key\);fac\.delete\(key\);stLatest\.delete\(key\)/);
-  assert.match(html, /if\(cacheOK\)EM_STORE=null/);
-  assert.match(html, /tx\.oncomplete=\(\)=>res\(true\)/);
 });
 
 test('Cloudflare build runs tests and the shared policy gate', () => {

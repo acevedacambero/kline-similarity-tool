@@ -270,236 +270,6 @@ function adaptiveCoarseThreshold(base,L){
   return Math.max(0.3,base-Math.min(0.15,Math.max(0,48-L)*0.005));
 }
 
-// ---------- 东方财富本地数据源：SQLite day_bar + dists_instrument.adj_factor 前复权 ----------
-let SOURCE="tdx", EM_FILES=null, EM_STAMP="", EM_META=null, EM_STORE=null;
-
-function sqliteScanTable(buf,table,maxCol,cb){
-  const dv=new DataView(buf),u8=new Uint8Array(buf);
-  let ps=dv.getUint16(16);if(ps===1)ps=65536;
-  const usable=ps-dv.getUint8(20),maxLocal=usable-35,minLocal=Math.floor((usable-12)*32/255)-23;
-  const td=new TextDecoder();
-  const varint=p2=>{let v=0;for(let i=0;i<8;i++){const b=u8[p2+i];if(b<128)return[v*128+b,p2+i+1];v=v*128+(b&127)}return[v*256+u8[p2+8],p2+9]};
-  function payloadBytes(p2,plen){
-    if(plen<=maxLocal)return u8.subarray(p2,p2+plen);
-    let local=minLocal+(plen-minLocal)%(usable-4);if(local>maxLocal)local=minLocal;
-    const out=new Uint8Array(plen);out.set(u8.subarray(p2,p2+local),0);
-    let got=local,next=dv.getUint32(p2+local);
-    while(next&&got<plen){const b=(next-1)*ps,take=Math.min(usable-4,plen-got);out.set(u8.subarray(b+4,b+4+take),got);got+=take;next=dv.getUint32(b)}
-    return out;
-  }
-  function decodeRow(bytes,mc){
-    const bdv=new DataView(bytes.buffer,bytes.byteOffset,bytes.byteLength);
-    const vi=p2=>{let v=0;for(let i=0;i<8;i++){const b=bytes[p2+i];if(b<128)return[v*128+b,p2+i+1];v=v*128+(b&127)}return[v*256+bytes[p2+8],p2+9]};
-    let hlen,q;[hlen,q]=vi(0);const types=[];
-    while(q<hlen){const r=vi(q);types.push(r[0]);q=r[1]}
-    let dp=hlen;const vals=[];
-    for(let ti=0;ti<types.length;ti++){
-      const t=types[ti];let v=null,sz=0;
-      if(t===0)v=null;
-      else if(t>=1&&t<=6){
-        sz=[1,2,3,4,6,8][t-1];
-        if(sz===8)v=Number(bdv.getBigInt64(dp));
-        else{v=bytes[dp]<<24>>24;for(let i=1;i<sz;i++)v=v*256+bytes[dp+i]}
-      }
-      else if(t===7){v=bdv.getFloat64(dp);sz=8}
-      else if(t===8)v=0;
-      else if(t===9)v=1;
-      else{const len=(t-(t&1?13:12))>>1;sz=len;v=t&1?td.decode(bytes.subarray(dp,dp+len)):bytes.subarray(dp,dp+len)}
-      vals.push(v);dp+=sz;
-      if(mc!==null&&ti>=mc)break;
-    }
-    return vals;
-  }
-  function walk(pg,mc,cb2){
-    const base=(pg-1)*ps,hdr=pg===1?base+100:base;
-    const type=u8[hdr],ncell=dv.getUint16(hdr+3),ptrs=hdr+(type===5?12:8);
-    if(type===5){
-      for(let i=0;i<ncell;i++){const cp=base+dv.getUint16(ptrs+i*2);walk(dv.getUint32(cp),mc,cb2)}
-      walk(dv.getUint32(hdr+8),mc,cb2);
-    }else if(type===13){
-      for(let i=0;i<ncell;i++){
-        let p2=base+dv.getUint16(ptrs+i*2),plen,rowid;
-        [plen,p2]=varint(p2);[rowid,p2]=varint(p2);
-        cb2(decodeRow(payloadBytes(p2,plen),mc),rowid);
-      }
-    }
-  }
-  let root=0;
-  walk(1,null,vals=>{if(vals[0]==="table"&&vals[1]===table)root=vals[3]});
-  if(!root)throw new Error("SQLite表不存在: "+table);
-  walk(root,maxCol,cb);
-}
-function emSymKey(sym){
-  if(typeof sym!=="string"||sym.length!==11)return null;
-  const c=sym.slice(5);
-  if(!/^\d{6}$/.test(c))return null;
-  if(sym.startsWith("SHSE."))return "sh"+c;
-  if(sym.startsWith("SZSE."))return "sz"+c;
-  return null;
-}
-function emDateInt(s){
-  return ((s.charCodeAt(0)-48)*1000+(s.charCodeAt(1)-48)*100+(s.charCodeAt(2)-48)*10+(s.charCodeAt(3)-48))*10000
-    +((s.charCodeAt(5)-48)*10+s.charCodeAt(6)-48)*100+(s.charCodeAt(8)-48)*10+s.charCodeAt(9)-48;
-}
-function parseEmNames(buffers){
-  // StkQuoteList 分片：\0+6位代码+\0，名称为代码前约70字节窗口内最后一个非空 GBK 段；按分片顺序首见优先。
-  let gbk=null;try{gbk=new TextDecoder("gbk")}catch(_){return {}}
-  const out={};
-  for(const u8 of buffers){
-    for(let i=1;i+7<u8.length;i++){
-      if(u8[i-1]!==0||u8[i+6]!==0)continue;
-      let ok=true;
-      for(let j=0;j<6;j++){const b=u8[i+j];if(b<48||b>57){ok=false;break}}
-      if(!ok)continue;
-      let code="";for(let j=0;j<6;j++)code+=String.fromCharCode(u8[i+j]);
-      if(out[code]===undefined){
-        const st=Math.max(0,i-70),win=u8.subarray(st,Math.max(st,i-6));
-        let e2=win.length;while(e2>0&&win[e2-1]===0)e2--;
-        let s2=e2;while(s2>0&&win[s2-1]!==0)s2--;
-        while(s2<e2&&win[s2]<0x20)s2++;
-        if(e2>s2){try{const nm=gbk.decode(win.subarray(s2,e2)).trim();if(nm)out[code]=nm}catch(_){}}
-      }
-      i+=6;
-    }
-  }
-  return out;
-}
-function emApplyFactors(rec,fd,ff){
-  // 前复权：price*=f(d)/f(last)，成交量反向调整；fd/ff 为按日期升序的复权因子变更点。
-  if(!fd||!fd.length||!rec.dates.length)return 0;
-  const fAt=d=>{let lo=0,hi=fd.length-1,ans=0;while(lo<=hi){const m=(lo+hi)>>1;if(fd[m]<=d){ans=m;lo=m+1}else hi=m-1}return ff[ans]};
-  const L=fAt(rec.dates[rec.dates.length-1]);
-  if(!Number.isFinite(L)||L<=0)return 0;
-  let events=0,prevF=null;
-  for(let i=0;i<rec.dates.length;i++){
-    const f=fAt(rec.dates[i]);
-    if(prevF!==null&&f!==prevF)events++;
-    prevF=f;
-    if(f!==L&&Number.isFinite(f)&&f>0){
-      const r=f/L;
-      rec.opens[i]*=r;rec.highs[i]*=r;rec.lows[i]*=r;rec.closes[i]*=r;rec.vols[i]/=r;
-    }
-  }
-  return events;
-}
-function emSortSeries(a){
-  let sorted=true;
-  for(let i=1;i<a.d.length;i++)if(a.d[i]<=a.d[i-1]){sorted=false;break}
-  if(sorted)return a;
-  const idx=a.d.map((_,i)=>i).sort((x,y)=>a.d[x]-a.d[y]||x-y);
-  const pick=arr=>idx.map(i=>arr[i]);
-  const b={d:pick(a.d),o:pick(a.o),h:pick(a.h),l:pick(a.l),c:pick(a.c),am:pick(a.am),v:pick(a.v)};
-  const out={d:[],o:[],h:[],l:[],c:[],am:[],v:[]};
-  for(let i=0;i<b.d.length;i++){
-    if(out.d.length&&b.d[i]===out.d[out.d.length-1]){const j=out.d.length-1;out.o[j]=b.o[i];out.h[j]=b.h[i];out.l[j]=b.l[i];out.c[j]=b.c[i];out.am[j]=b.am[i];out.v[j]=b.v[i]}
-    else{out.d.push(b.d[i]);out.o.push(b.o[i]);out.h.push(b.h[i]);out.l.push(b.l[i]);out.c.push(b.c[i]);out.am.push(b.am[i]);out.v.push(b.v[i])}
-  }
-  return out;
-}
-async function emFileBuf(f){const file=f.getFile?await f.getFile():f;return file.arrayBuffer()}
-async function buildEmStore(post){
-  const prog=(ph,i,n)=>{if(post)post({type:"progress",phase:ph,done:i,total:n,rate:"",eta:""})};
-  // 权息变更点远小于日线明细，先解析它，避免持有全量日线数组时再读取数百 MB instrument 文件。
-  const fac=new Map(),stLatest=new Map();
-  let fi=0;
-  for(const f of EM_FILES.instrument){
-    prog("解析东财权息库",fi++,EM_FILES.instrument.length);
-    const buf=await emFileBuf(f);
-    sqliteScanTable(buf,"dists_instrument",12,v=>{
-      const key=emSymKey(v[0]);if(!key)return;
-      const d=emDateInt(v[1]),af=v[12];
-      if(Number.isFinite(af)&&af>0){
-        let g=fac.get(key);if(!g){g={d:[],f:[],order:true};fac.set(key,g)}
-        const n=g.d.length;
-        if(!n){g.d.push(d);g.f.push(af)}
-        else if(d>g.d[n-1]){if(af!==g.f[n-1]){g.d.push(d);g.f.push(af)}}
-        else if(d<g.d[n-1]){g.d.push(d);g.f.push(af);g.order=false}
-      }
-      const prev=stLatest.get(key);
-      if(!prev||d>=prev.d)stLatest.set(key,{d,st:!!v[3]});
-    });
-    await new Promise(r=>setTimeout(r));
-  }
-  for(const g of fac.values()){
-    if(g.order)continue;
-    const idx=g.d.map((_,i)=>i).sort((x,y)=>g.d[x]-g.d[y]||x-y);
-    const dd=[],ffv=[];
-    for(const i of idx){
-      if(dd.length&&g.d[i]===dd[dd.length-1]){ffv[ffv.length-1]=g.f[i];continue}
-      if(dd.length&&g.f[i]===ffv[ffv.length-1])continue;
-      dd.push(g.d[i]);ffv.push(g.f[i]);
-    }
-    g.d=dd;g.f=ffv;
-  }
-
-  const acc=new Map();fi=0;
-  for(const f of EM_FILES.dayBar){
-    prog("解析东财日线库",fi++,EM_FILES.dayBar.length);
-    const buf=await emFileBuf(f);
-    sqliteScanTable(buf,"dists_day_bar",9,v=>{
-      const key=emSymKey(v[0]);if(!key)return;
-      const c=v[6]??v[9];
-      if(!Number.isFinite(c)||c<=0)return;
-      let a=acc.get(key);if(!a){a={d:[],o:[],h:[],l:[],c:[],am:[],v:[]};acc.set(key,a)}
-      a.d.push(emDateInt(v[1]));a.o.push(v[3]||c);a.h.push(v[4]||c);a.l.push(v[5]||c);a.c.push(c);a.v.push(v[7]||0);a.am.push(v[8]||0);
-    });
-    await new Promise(r=>setTimeout(r));
-  }
-
-  // 名称分片逐个读取和释放，避免把所有 StkQuoteList 文件同时留在内存。
-  const names={};fi=0;
-  for(const f of EM_FILES.names){
-    prog("解析东财名称",fi++,EM_FILES.names.length);
-    try{const part=parseEmNames([new Uint8Array(await emFileBuf(f))]);for(const[code,name]of Object.entries(part))if(names[code]===undefined)names[code]=name}catch(_){}
-  }
-  EM_STORE=new Map();
-  const keys=[],stKeys=[],pend=[];let cacheOK=!!DB,converted=0;
-  for(const[key,a0]of acc){
-    const a=emSortSeries(a0);
-    const rec={dates:Int32Array.from(a.d),opens:Float64Array.from(a.o),highs:Float64Array.from(a.h),lows:Float64Array.from(a.l),
-      closes:Float64Array.from(a.c),amounts:Float64Array.from(a.am),vols:Float64Array.from(a.v)};
-    const g=fac.get(key);
-    const qEvents=g?emApplyFactors(rec,g.d,g.f):0;
-    rec.warn=!g;rec.qStatus=g?"qfq":"raw";rec.qEvents=qEvents;
-    rec.lastD=rec.dates.length?rec.dates[rec.dates.length-1]:0;
-    EM_STORE.set(key,rec);keys.push(key);
-    const st=stLatest.get(key);if(st&&st.st)stKeys.push(key);
-    if(DB){
-      pend.push({key:"em:"+key,ver:ALGO_VER,rv:EM_STAMP,dates:rec.dates.buffer,opens:rec.opens.buffer,highs:rec.highs.buffer,lows:rec.lows.buffer,
-        closes:rec.closes.buffer,amounts:rec.amounts.buffer,vols:rec.vols.buffer,warn:rec.warn,qStatus:rec.qStatus,qEvents:rec.qEvents,lastD:rec.lastD});
-      if(pend.length>=100&&!await idbPutBatch(DB,pend.splice(0)))cacheOK=false;
-    }
-    // 删除已转换的稀疏 JS 数组和辅助记录，使峰值随转换推进而下降。
-    acc.delete(key);fac.delete(key);stLatest.delete(key);
-    if(++converted%200===0)await new Promise(r=>setTimeout(r));
-  }
-  keys.sort();
-  EM_META={keys,stKeys,names};
-  if(DB){
-    pend.push({key:"em:__meta__",ver:ALGO_VER,rv:EM_STAMP,keys,stKeys,names});
-    if(!await idbPutBatch(DB,pend.splice(0)))cacheOK=false;
-  }
-  // 缓存可靠落盘后按需从 IndexedDB 读取，避免首次解析后长期保留全市场 TypedArray。
-  if(cacheOK)EM_STORE=null;
-}
-async function ensureEmMeta(post){
-  if(EM_META)return;
-  if(!DB){try{DB=await idbOpen()}catch(_){DB=null}}
-  const meta=DB?await idbGet(DB,"em:__meta__"):null;
-  if(meta&&meta.ver===ALGO_VER&&meta.rv===EM_STAMP){EM_META={keys:meta.keys,stKeys:meta.stKeys,names:meta.names};return}
-  await buildEmStore(post);
-}
-async function emGetStock(key){
-  if(EM_STORE)return EM_STORE.get(key)||null;
-  const hit=DB?await idbGet(DB,"em:"+key):null;
-  if(hit&&hit.ver===ALGO_VER&&hit.rv===EM_STAMP){
-    return {dates:new Int32Array(hit.dates),opens:new Float64Array(hit.opens),highs:new Float64Array(hit.highs),lows:new Float64Array(hit.lows),
-      closes:new Float64Array(hit.closes),amounts:new Float64Array(hit.amounts),vols:new Float64Array(hit.vols),
-      warn:hit.warn,qStatus:hit.qStatus,qEvents:hit.qEvents,lastD:hit.lastD};
-  }
-  await buildEmStore(null);
-  return EM_STORE?EM_STORE.get(key)||null:null;
-}
 
 function idbOpen(){
   return new Promise((res,rej)=>{
@@ -528,7 +298,6 @@ function idbPutBatch(db,recs){
 }
 
 async function getStock(key,pending){
-  if(SOURCE==="em")return emGetStock(key);
   const f0=FILES.get(key);
   if(!f0)return null;
   const file=f0.getFile?await f0.getFile():f0;
@@ -566,18 +335,6 @@ function subScores(stk,s,e,R,zzth){
 self.onmessage=async ev=>{
   const msg=ev.data;
   if(msg.type==="files"){
-    SOURCE=msg.source==="em"?"em":"tdx";
-    if(SOURCE==="em"){
-      EM_FILES={dayBar:msg.emDayBar||[],instrument:msg.emInstrument||[],names:msg.emNames||[]};
-      EM_META=null;EM_STORE=null;
-      EM_STAMP="em1:"+[...EM_FILES.dayBar,...EM_FILES.instrument,...EM_FILES.names].map(f=>(f.name||"")+":"+(f.size||0)+":"+(f.lastModified||0)).join("|");
-      try{
-        if(!DB){try{DB=await idbOpen()}catch(_){DB=null}}
-        await ensureEmMeta(postMessage);
-        postMessage({type:"emReady",keys:EM_META.keys,names:EM_META.names||{},stKeys:EM_META.stKeys||[]});
-      }catch(err){postMessage({type:"emReady",error:String(err&&err.stack||err)})}
-      return;
-    }
     FILES=new Map(msg.entries);RIGHTS_STAMP=msg.rightsStamp||"raw";let decodeError=null;
     try{RIGHTS=msg.gbbq?decodeGbbq(msg.gbbq,msg.keyB64):null}
     catch(err){RIGHTS=new Map();decodeError=err}
@@ -587,14 +344,8 @@ self.onmessage=async ev=>{
   }
   if(msg.type==="series"){
     try{
-      let daily;
-      if(SOURCE==="em"){
-        daily=await emGetStock(msg.key);
-        if(!daily)throw new Error("东方财富数据中未找到 "+msg.key);
-      }else{
-        const f0=FILES.get(msg.key),f=f0.getFile?await f0.getFile():f0;
-        daily=parseDayQfq(await f.arrayBuffer(),msg.key);
-      }
+      const f0=FILES.get(msg.key),f=f0.getFile?await f0.getFile():f0;
+      const daily=parseDayQfq(await f.arrayBuffer(),msg.key);
       const p=aggregateSeries(daily,msg.timeframe,msg.endD||Infinity);
       postMessage({type:"series",reqId:msg.reqId,dates:p.dates,opens:p.opens,highs:p.highs,lows:p.lows,closes:p.closes,amounts:p.amounts,vols:p.vols,
         rejected:p.rejected,qStatus:p.qStatus,qEvents:p.qEvents,rightsStatus:p.rightsStatus,rightsReason:p.rightsReason});
@@ -647,10 +398,8 @@ async function runMatch(cfg){
   }
   const refStartD=refStk.dates[rs],refEndD=refStk.dates[re];
 
-  if(SOURCE==="em")await ensureEmMeta(post);
   const stSet=new Set(cfg.exST?cfg.stKeys||[]:[]);
-  if(SOURCE==="em"&&cfg.exST)for(const k of EM_META.stKeys||[])stSet.add(k);
-  const srcKeys=SOURCE==="em"?EM_META.keys:[...FILES.keys()];
+  const srcKeys=[...FILES.keys()];
   const keys=[];
   for(const k of srcKeys){
     const mkt=k.slice(0,2),c=k.slice(2);
@@ -870,4 +619,4 @@ function packStk(stk,s,e){
   return {startD:stk.dates[s],endD:stk.dates[e],win,nnSmall,fut,futNn:futNn.length>1?Array.from(resample(new Float64Array(futNn),Math.min(60,futNn.length))):[],lastD:stk.lastD};
 }
 self.__KLINE_TEST_API__={version:ALGO_VER,parseDayBuffer,resolveRightsState,corporateActionFactor,applyCorporateActions,
-  aggregateSeries,periodKey,zscore,cosine,dtwDist,zigAmps,alignCommonDates,sliceSeriesByDate,dedupeOverlaps,mergePerStockCandidates,historicalMaxEnd,recentWindowStarts,recentFreshnessCutoff,wilsonInterval,clusterHorizonValues,bootstrapWinInterval,isCacheValid,adaptiveCoarseThreshold,sqliteScanTable,emSymKey,emDateInt,parseEmNames,emApplyFactors,emSortSeries};
+  aggregateSeries,periodKey,zscore,cosine,dtwDist,zigAmps,alignCommonDates,sliceSeriesByDate,dedupeOverlaps,mergePerStockCandidates,historicalMaxEnd,recentWindowStarts,recentFreshnessCutoff,wilsonInterval,clusterHorizonValues,bootstrapWinInterval,isCacheValid,adaptiveCoarseThreshold};
