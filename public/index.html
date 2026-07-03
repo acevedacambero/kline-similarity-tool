@@ -69,6 +69,7 @@ details summary{cursor:pointer;font-size:13px;color:#2a78d6;margin-top:8px}
     <div class="ctl"><label>股票代码（支持名称联想）</label><input type="text" id="code" value="301377" list="codeList" placeholder="如 301377"><datalist id="codeList"></datalist></div>
     <div class="ctl"><label>开始日期</label><input type="date" id="d1" value="2025-12-01"></div>
     <div class="ctl"><label>结束日期 <span id="quickBtns"><button class="mini sec" data-n="20">20日</button><button class="mini sec" data-n="60">60日</button><button class="mini sec" data-n="120">120日</button><button class="mini sec" data-n="250">250日</button></span></label><input type="date" id="d2" value="2026-05-20"></div>
+    <div class="ctl"><label>数据周期</label><select id="timeframe"><option value="day" selected>日线</option><option value="week">周线</option><option value="month">月线</option></select></div>
     <div class="ctl"><label>波段阈值</label><select id="zz"><option value="0.06">6%</option><option value="0.08" selected>8%</option><option value="0.10">10%</option><option value="0.12">12%</option></select></div>
     <div class="ctl"><button id="btnA" disabled>① 分析该股</button></div>
     <div class="ctl"><button id="btnM" disabled>② 匹配相似</button></div>
@@ -81,7 +82,7 @@ details summary{cursor:pointer;font-size:13px;color:#2a78d6;margin-top:8px}
       <label class="chip"><input type="radio" name="mode" value="peer">同期联动（同区间谁和它最像）</label>
     </span>
     <span class="chip">滑窗步长<select id="step"><option value="2">2</option><option value="3" selected>3</option><option value="5">5</option></select></span>
-    <span class="chip">近期范围<input type="number" id="recentBars" min="15" max="5000" placeholder="自动" disabled>交易日</span>
+    <span class="chip">近期范围<input type="number" id="recentBars" min="8" max="5000" placeholder="自动" disabled>个周期</span>
     <span class="chip"><label class="chip"><input type="checkbox" id="isolate" checked>防前视：仅匹配目标区间之前的历史</label></span>
     <span class="chip">每股上限<select id="perStock"><option value="1">1</option><option value="2" selected>2</option><option value="3">3</option></select></span>
     <span class="chip">展示前<select id="topN"><option value="30">30</option><option value="50" selected>50</option><option value="100">100</option></select>名</span>
@@ -148,7 +149,7 @@ details summary{cursor:pointer;font-size:13px;color:#2a78d6;margin-top:8px}
 <script id="gbbqKey" type="text/plain">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</script>
 <script id="workerSrc" type="text/plain">
 "use strict";
-const ALGO_VER=7;
+const ALGO_VER=8;
 let FILES=null, RIGHTS=new Map(), RIGHTS_STATE={status:"raw",reason:"missing",count:0}, RIGHTS_STAMP="raw", cancelled=false, DB=null;
 
 function zscore(a){
@@ -263,6 +264,41 @@ function parseDayQfq(buf,key){
     qEvents:applied,nBars:p.dates.length,lastD:p.dates.length?p.dates[p.dates.length-1]:0};
 }
 
+function normalizeTimeframe(value){return value==="week"||value==="month"?value:"day"}
+function dateOrdinal(d){const s=String(d);return Math.floor(Date.UTC(+s.slice(0,4),+s.slice(4,6)-1,+s.slice(6,8))/864e5)}
+function periodKey(d,timeframe){
+  if(timeframe==="month")return Math.floor(d/100);
+  if(timeframe==="week"){
+    const s=String(d),dt=new Date(Date.UTC(+s.slice(0,4),+s.slice(4,6)-1,+s.slice(6,8)));
+    return dateOrdinal(d)-((dt.getUTCDay()+6)%7);
+  }
+  return d;
+}
+function aggregateSeries(series,timeframe="day",endD=Infinity){
+  timeframe=normalizeTimeframe(timeframe);
+  if(timeframe==="day"&&endD===Infinity){if(!series.periods)series.periods=series.dates;return series}
+  const dates=[],periods=[],opens=[],highs=[],lows=[],closes=[],amounts=[],vols=[];
+  const hasOHLC=!!series.opens,hasAmount=!!series.amounts;
+  let key=null,o=0,h=0,l=0,c=0,amt=0,v=0,lastD=0;
+  const flush=()=>{
+    if(key===null)return;
+    dates.push(lastD);periods.push(key);closes.push(c);vols.push(v);
+    if(hasOHLC){opens.push(o);highs.push(h);lows.push(l)}
+    if(hasAmount)amounts.push(amt);
+  };
+  for(let i=0;i<series.dates.length;i++){
+    const d=series.dates[i];if(d>endD)break;
+    const next=periodKey(d,timeframe);
+    if(next!==key){flush();key=next;o=hasOHLC?series.opens[i]:0;h=hasOHLC?series.highs[i]:0;l=hasOHLC?series.lows[i]:0;amt=0;v=0}
+    if(hasOHLC){h=Math.max(h,series.highs[i]);l=Math.min(l,series.lows[i])}
+    c=series.closes[i];amt+=hasAmount?series.amounts[i]:0;v+=series.vols[i];lastD=d;
+  }
+  flush();
+  return {...series,dates:Int32Array.from(dates),periods:Int32Array.from(periods),closes:Float64Array.from(closes),vols:Float64Array.from(vols),
+    opens:hasOHLC?Float64Array.from(opens):undefined,highs:hasOHLC?Float64Array.from(highs):undefined,lows:hasOHLC?Float64Array.from(lows):undefined,
+    amounts:hasAmount?Float64Array.from(amounts):undefined,nBars:dates.length,lastD:dates.length?dates[dates.length-1]:0,timeframe};
+}
+
 function decodeGbbq(buf,keyB64){
   const bin=atob(keyB64),kb=new Uint8Array(bin.length);
   for(let i=0;i<bin.length;i++)kb[i]=bin.charCodeAt(i);
@@ -333,16 +369,17 @@ function bsearch(dates,d){
 }
 function alignCommonDates(a,b){
   const dates=[],ac=[],av=[],bc=[],bv=[];let i=0,j=0;
-  while(i<a.dates.length&&j<b.dates.length){
-    if(a.dates[i]===b.dates[j]){dates.push(a.dates[i]);ac.push(a.closes[i]);av.push(a.vols[i]);bc.push(b.closes[j]);bv.push(b.vols[j]);i++;j++}
-    else if(a.dates[i]<b.dates[j])i++;else j++;
+  const ak=a.periods||a.dates,bk=b.periods||b.dates;
+  while(i<ak.length&&j<bk.length){
+    if(ak[i]===bk[j]){dates.push(a.dates[i]);ac.push(a.closes[i]);av.push(a.vols[i]);bc.push(b.closes[j]);bv.push(b.vols[j]);i++;j++}
+    else if(ak[i]<bk[j])i++;else j++;
   }
   return {dates:Int32Array.from(dates),aCloses:Float64Array.from(ac),aVols:Float64Array.from(av),bCloses:Float64Array.from(bc),bVols:Float64Array.from(bv)};
 }
 function sliceSeriesByDate(stk,startD,endD){
   let lo=0,hi=stk.dates.length;while(lo<hi){const m=(lo+hi)>>1;if(stk.dates[m]<startD)lo=m+1;else hi=m}const s=lo;
   lo=s;hi=stk.dates.length;while(lo<hi){const m=(lo+hi)>>1;if(stk.dates[m]<=endD)lo=m+1;else hi=m}const e=lo;
-  return {dates:stk.dates.subarray(s,e),closes:stk.closes.subarray(s,e),vols:stk.vols.subarray(s,e)};
+  return {dates:stk.dates.subarray(s,e),periods:stk.periods?stk.periods.subarray(s,e):undefined,closes:stk.closes.subarray(s,e),vols:stk.vols.subarray(s,e)};
 }
 function overlapRatio(a,b,L){return Math.max(0,Math.min(a.e,b.e)-Math.max(a.s,b.s)+1)/L}
 function dedupeOverlaps(rows,threshold,L){
@@ -367,7 +404,6 @@ function recentFreshnessCutoff(dates,refEndIndex,lookback=30){
   return dates[Math.max(0,end-Math.max(0,Math.floor(lookback)))]||0;
 }
 function wilsonInterval(wins,n,z=1.96){if(!n)return null;const p=wins/n,z2=z*z,den=1+z2/n,mid=(p+z2/(2*n))/den,half=z*Math.sqrt(p*(1-p)/n+z2/(4*n*n))/den;return [mid-half,mid+half]}
-function dateOrdinal(d){const s=String(d);return Math.floor(Date.UTC(+s.slice(0,4),+s.slice(4,6)-1,+s.slice(6,8))/864e5)}
 function clusterHorizonValues(rows,horizon,maxGapDays=7){
   const valid=rows.filter(r=>r.fut&&Number.isFinite(r.fut[horizon])).sort((a,b)=>a.endD-b.endD),out=[];let vals=[],anchor=null;
   for(const r of valid){const day=dateOrdinal(r.endD);if(anchor!==null&&day-anchor>maxGapDays){out.push(vals.reduce((a,b)=>a+b,0)/vals.length);vals=[];anchor=day}else if(anchor===null)anchor=day;vals.push(r.fut[horizon])}
@@ -454,7 +490,7 @@ self.onmessage=async ev=>{
   if(msg.type==="series"){
     try{
       const f0=FILES.get(msg.key),f=f0.getFile?await f0.getFile():f0;
-      const p=parseDayQfq(await f.arrayBuffer(),msg.key);
+      const p=aggregateSeries(parseDayQfq(await f.arrayBuffer(),msg.key),msg.timeframe,msg.endD||Infinity);
       postMessage({type:"series",reqId:msg.reqId,dates:p.dates,opens:p.opens,highs:p.highs,lows:p.lows,closes:p.closes,amounts:p.amounts,vols:p.vols,
         rejected:p.rejected,qStatus:p.qStatus,qEvents:p.qEvents,rightsStatus:p.rightsStatus,rightsReason:p.rightsReason});
     }catch(err){postMessage({type:"series",reqId:msg.reqId,error:String(err)})}
@@ -475,8 +511,10 @@ async function runMatch(cfg){
   const post=o=>postMessage(o);
 
   const refKey=cfg.refKey;
-  const refStk=await getStock(refKey,cache,pending);
-  if(!refStk){post({type:"error",msg:"未找到参考股票数据"});return}
+  const timeframe=normalizeTimeframe(cfg.timeframe);
+  const refDaily=await getStock(refKey,cache,pending);
+  if(!refDaily){post({type:"error",msg:"未找到参考股票数据"});return}
+  const refStk=aggregateSeries(refDaily,timeframe,cfg.d2);
   refStk.ma20=ma20Arr(refStk.closes);
   let rs=-1,re=-1;
   for(let i=0;i<refStk.dates.length;i++){
@@ -484,7 +522,8 @@ async function runMatch(cfg){
     if(d>=cfg.d1&&rs<0)rs=i;
     if(d<=cfg.d2)re=i;
   }
-  if(rs<0||re<=rs||re-rs<15){post({type:"error",msg:"参考区间内数据不足"});return}
+  const minPeriods=timeframe==="day"?16:8;
+  if(rs<0||re<=rs||re-rs+1<minPeriods){post({type:"error",msg:`参考区间内${timeframe==="month"?"月线":timeframe==="week"?"周线":"日线"}不足${minPeriods}个周期`});return}
   const L=re-rs+1;
   const R={
     zcum:zscore(logSlice(refStk.closes,rs,re)),
@@ -527,7 +566,8 @@ async function runMatch(cfg){
   const coarse=[];
   const scratch=new Float64Array(32);
   const mode=cfg.mode;
-  const recentCutoff=mode==="recent"?recentFreshnessCutoff(refStk.dates,re,30):0;
+  const freshnessBars=timeframe==="month"?2:timeframe==="week"?6:30;
+  const recentCutoff=mode==="recent"?recentFreshnessCutoff(refStk.dates,re,freshnessBars):0;
   const effectiveRecentBars=mode==="recent"?Math.max(L,Number.isFinite(cfg.recentBars)?Math.floor(cfg.recentBars):L):null;
   let done=0,skipped=0;const skipReasons={},skipDetails=[];
   const skip=(reason,key,err)=>{skipped++;skipReasons[reason]=(skipReasons[reason]||0)+1;if(err&&skipDetails.length<8)skipDetails.push({key,reason,error:String(err&&err.message||err)})};
@@ -542,16 +582,17 @@ async function runMatch(cfg){
       await new Promise(r=>setTimeout(r));
     }
     try{
-      const stk=await getStock(key,cache,pending);
-      if(!stk){skip("无数据",key);continue}
+      const daily=await getStock(key,cache,pending);
+      if(!daily){skip("无数据",key);continue}
+      const stk=aggregateSeries(daily,timeframe);
       const n=stk.dates.length;
-      if(cfg.exNew&&n<120){skip("上市不足120日",key);continue}
+      if(cfg.exNew&&daily.dates.length<120){skip("上市不足120日",key);continue}
       if(mode==="recent"&&stk.dates[n-1]<recentCutoff){skip("最后交易日过早",key);continue}
       if(pending.length>=200&&DB){await idbPutBatch(DB,pending.splice(0))}
 
       if(mode==="peer"){
         if(key===refKey)continue;
-        const refWin={dates:refStk.dates.subarray(rs,re+1),closes:refStk.closes.subarray(rs,re+1),vols:refStk.vols.subarray(rs,re+1)};
+        const refWin={dates:refStk.dates.subarray(rs,re+1),periods:refStk.periods?refStk.periods.subarray(rs,re+1):undefined,closes:refStk.closes.subarray(rs,re+1),vols:refStk.vols.subarray(rs,re+1)};
         const peerSlice=sliceSeriesByDate(stk,refStartD,refEndD);
         const al=alignCommonDates(refWin,peerSlice);
         if(al.dates.length<L*0.95){skip("同期共同交易日不足",key);continue}
@@ -661,7 +702,7 @@ async function runMatch(cfg){
   };
   const rows=kept.map(toRow),statRows=dedupeOverlaps(kept,0.7,L).map(toRow),statSummary={};
   for(const hk of["r5","r10","r20","r60"]){const raw=statRows.map(r=>r.fut[hk]).filter(Number.isFinite),clusters=clusterHorizonValues(statRows,hk,7).sort((a,b)=>a-b);statSummary[hk]={rawN:raw.length,periodN:clusters.length,win:clusters.length?clusters.filter(x=>x>0).length/clusters.length:null,interval:bootstrapWinInterval(clusters),median:clusters.length?clusters[Math.floor(clusters.length/2)]:null}}
-  post({type:"result",rows,statRows,meta:{mode,recentBars:effectiveRecentBars,scanned:total,skipped,skipReasons,skipDetails,settings:{preset:cfg.preset||"custom",coarseThreshold,K_COARSE,K_DTW,dtwBand},statSummary,L,refStartD,refEndD,elapsed:((Date.now()-t0)/1000).toFixed(1),
+  post({type:"result",rows,statRows,meta:{mode,timeframe,recentBars:effectiveRecentBars,scanned:total,skipped,skipReasons,skipDetails,settings:{preset:cfg.preset||"custom",coarseThreshold,K_COARSE,K_DTW,dtwBand},statSummary,L,refStartD,refEndD,elapsed:((Date.now()-t0)/1000).toFixed(1),
     refWarn:refStk.warn,candidates:coarse.length,refNn:Array.from(resample(refStk.closes.subarray(rs,re+1),120)).map(x=>x/refStk.closes[rs])}});
 }
 
@@ -701,13 +742,13 @@ function packStk(stk,s,e){
   return {startD:stk.dates[s],endD:stk.dates[e],win,nnSmall,fut,futNn:futNn.length>1?Array.from(resample(new Float64Array(futNn),Math.min(60,futNn.length))):[],lastD:stk.lastD};
 }
 self.__KLINE_TEST_API__={version:ALGO_VER,parseDayBuffer,resolveRightsState,corporateActionFactor,applyCorporateActions,
-  zscore,cosine,dtwDist,zigAmps,alignCommonDates,sliceSeriesByDate,dedupeOverlaps,mergePerStockCandidates,historicalMaxEnd,recentWindowStarts,recentFreshnessCutoff,wilsonInterval,clusterHorizonValues,bootstrapWinInterval,isCacheValid};
+  aggregateSeries,periodKey,zscore,cosine,dtwDist,zigAmps,alignCommonDates,sliceSeriesByDate,dedupeOverlaps,mergePerStockCandidates,historicalMaxEnd,recentWindowStarts,recentFreshnessCutoff,wilsonInterval,clusterHorizonValues,bootstrapWinInterval,isCacheValid};
 </script>
 
 <script>
 "use strict";
 const $=id=>document.getElementById(id);
-const UI_ALGO_VER=7;
+const UI_ALGO_VER=8;
 let files=new Map(), names={}, gbbqFile=null, rightsOK=false, rightsState="raw", ref=null, worker=null, lastRows=null, lastStatRows=null, lastMeta=null, referenceDates=null, sortKey="score", sortAsc=false;
 let seriesSeq=0;const seriesWait=new Map();
 
@@ -813,15 +854,16 @@ async function initWorker(){
   worker.postMessage({type:"files",entries:[...files.entries()],gbbq,keyB64:$("gbbqKey").textContent.trim(),rightsStamp});
 }
 
-function getAdjustedSeries(key){
+function getAdjustedSeries(key,timeframe="day",endD=null){
   if(!worker)return Promise.resolve(null);
-  return new Promise(resolve=>{const reqId=++seriesSeq;seriesWait.set(reqId,resolve);worker.postMessage({type:"series",reqId,key})});
+  return new Promise(resolve=>{const reqId=++seriesSeq;seriesWait.set(reqId,resolve);worker.postMessage({type:"series",reqId,key,timeframe,endD})});
 }
 
 function keyOf(code){return (code.startsWith("6")||code.startsWith("5")?"sh":/^(43|83|87|92)/.test(code)?"bj":"sz")+code}
 const dnum=s=>parseInt(s.replace(/-/g,""),10);
 const fmtD=d=>String(d).replace(/^(\d{4})(\d{2})(\d{2})$/,"$1/$2/$3");
 const pct=x=>x===null||x===undefined?"—":(x*100).toFixed(1)+"%";
+const TF_LABEL={day:"日线",week:"周线",month:"月线"},TF_UNIT={day:"日",week:"周",month:"月"};
 function lastIndexOnOrBefore(dates,target){
   let lo=0,hi=dates.length-1,ans=-1;while(lo<=hi){const m=(lo+hi)>>1;if(dates[m]<=target){ans=m;lo=m+1}else hi=m-1}return ans;
 }
@@ -831,10 +873,18 @@ function syncModeControls(){
   const mode=document.querySelector('input[name=mode]:checked').value,isHist=mode==="hist",isRecent=mode==="recent";
   if(isHist)$("isolate").checked=savedIsolate;else savedIsolate=$("isolate").checked;
   $("isolate").disabled=!isHist;$("recentBars").disabled=!isRecent;
-  if(isRecent)setMsg("模式",`近期模式按每只证券最新数据向前搜索；近期范围留空时自动等于目标区间交易日数。`);
+  if(isRecent)setMsg("模式",`近期模式按每只证券最新数据向前搜索；近期范围留空时自动等于目标区间周期数。`);
 }
 document.querySelectorAll('input[name=mode]').forEach(r=>r.addEventListener("change",syncModeControls));
 syncModeControls();
+function syncTimeframe(){
+  const tf=$("timeframe").value,unit=TF_UNIT[tf];
+  $("quickBtns").querySelectorAll("button[data-n]").forEach(b=>b.textContent=b.dataset.n+unit);
+  ref=null;referenceDates=null;lastChart=null;lastRows=null;lastMeta=null;
+  $("refPanel").style.display="none";$("matchPanel").style.display="none";
+  setMsg("周期",`已切换为${TF_LABEL[tf]}，请重新分析目标股票。`);
+}
+$("timeframe").addEventListener("change",syncTimeframe);
 const MATCH_PRESETS={stable:{coarseTh:.82,coarseLimit:400,dtwLimit:120,dtwBand:5},balanced:{coarseTh:.75,coarseLimit:600,dtwLimit:200,dtwBand:6},loose:{coarseTh:.65,coarseLimit:900,dtwLimit:300,dtwBand:8}};
 $("matchPreset").addEventListener("change",()=>{const p=MATCH_PRESETS[$("matchPreset").value];for(const[k,v]of Object.entries(p))$(k).value=v});
 
@@ -844,9 +894,10 @@ $("quickBtns").addEventListener("click",e=>{
   e.preventDefault();
   if(referenceDates&&referenceDates.length){
     const end=dnum($("d2").value),ei=lastIndexOnOrBefore(referenceDates,end);
-    if(ei>=0){const d=String(referenceDates[Math.max(0,ei-parseInt(n)+1)]);$("d1").value=d.slice(0,4)+"-"+d.slice(4,6)+"-"+d.slice(6);setMsg("区间",`已按实际交易日回推 ${n} 日。`);return}
+    if(ei>=0){const d=String(referenceDates[Math.max(0,ei-parseInt(n)+1)]);$("d1").value=d.slice(0,4)+"-"+d.slice(4,6)+"-"+d.slice(6);setMsg("区间",`已按实际${TF_LABEL[$("timeframe").value]}回推 ${n} 个周期。`);return}
   }
-  const d2=new Date($("d2").value||new Date()),d1=new Date(d2.getTime()-n*1.45*864e5);
+  const tf=$("timeframe").value,days=tf==="month"?n*30.5:tf==="week"?n*7:n*1.45;
+  const d2=new Date($("d2").value||new Date()),d1=new Date(d2.getTime()-days*864e5);
   $("d1").value=d1.toISOString().slice(0,10);setMsg("区间","参考股票尚未载入，当前为自然日近似区间。");
 });
 
@@ -869,20 +920,22 @@ async function analyze(code){
   const key=keyOf(code),f=files.get(key);
   if(!f){setMsg("分析",`未找到 ${code} 的日线文件`);return}
   setMsg("分析","解析中…");
-  const adj=await getAdjustedSeries(key);
+  const timeframe=$("timeframe").value,unit=TF_UNIT[timeframe];
+  const adj=await getAdjustedSeries(key,timeframe,dnum($("d2").value));
   if(!adj||adj.error||!adj.dates){setMsg("分析","解析失败："+(adj&&adj.error||"Worker 未返回数据"));return}
   const rows=Array.from(adj.dates,(d,i)=>({d,o:adj.opens[i],h:adj.highs[i],l:adj.lows[i],c:adj.closes[i],amt:adj.amounts[i],v:adj.vols[i]}));
   referenceDates=rows.map(r=>r.d);
   const qStatus=adj.qStatus||"raw",qEvents=adj.qEvents||0;
   const D1=dnum($("d1").value),D2=dnum($("d2").value);
   const idx=[];rows.forEach((r,i)=>{if(r.d>=D1&&r.d<=D2)idx.push(i)});
-  if(idx.length<10){setMsg("分析","区间内数据不足10天");return}
+  const minPeriods=timeframe==="day"?16:8;
+  if(idx.length<minPeriods){setMsg("分析",`区间内${TF_LABEL[timeframe]}不足${minPeriods}个周期`);return}
   const s=idx[0],e=idx[idx.length-1],bars=rows.slice(s,e+1);
   const closes=rows.map(r=>r.c);
   const ma=(i,n)=>{if(i<n-1)return null;let t=0;for(let j=i-n+1;j<=i;j++)t+=closes[j];return t/n};
   ref={code,key};
   $("refPanel").style.display="block";
-  $("refTitle").textContent=`${code} ${names[key]||""}  ${fmtD(bars[0].d)} — ${fmtD(bars[bars.length-1].d)}（${bars.length}个交易日）· 数据截至 ${fmtD(rows[rows.length-1].d)} · ${qStatus==="qfq"?`真实权息前复权（应用${qEvents}次）`:"⚠ 未复权（未读取到gbbq）"}`;
+  $("refTitle").textContent=`${code} ${names[key]||""}  ${fmtD(bars[0].d)} — ${fmtD(bars[bars.length-1].d)}（${bars.length}个${unit}线周期）· 数据截至 ${fmtD(rows[rows.length-1].d)} · ${qStatus==="qfq"?`真实权息前复权（应用${qEvents}次）`:"⚠ 未复权（未读取到gbbq）"}`;
 
   const prev=s>0?rows[s-1].c:bars[0].o;
   const hi=Math.max(...bars.map(b=>b.h)),lo=Math.min(...bars.map(b=>b.l));
@@ -937,7 +990,7 @@ async function analyze(code){
   }
 
   $("vpStats").textContent="";
-  for(const x of[["上涨日",upN+"天，均量"+(upN?(upV/upN/1e4).toFixed(0):0)+"万股"],["下跌日",dnN+"天，均量"+(dnN?(dnV/dnN/1e4).toFixed(0):0)+"万股"],
+  for(const x of[[`上涨${unit}`,upN+`个周期，均量`+(upN?(upV/upN/1e4).toFixed(0):0)+"万股"],[`下跌${unit}`,dnN+`个周期，均量`+(dnN?(dnV/dnN/1e4).toFixed(0):0)+"万股"],
     ["量价配合","涨/跌均量比 "+vp.toFixed(2)+(vp>1.2?"（涨放跌缩，健康）":vp<0.85?"（跌放涨缩，警惕）":"（中性）")]]){
     const div=document.createElement("div");div.className="stat";
     const k=document.createElement("div");k.className="k";k.textContent=x[0];
@@ -947,7 +1000,7 @@ async function analyze(code){
 
   lastChart={bars,maAt:i=>({5:ma(s+i,5),10:ma(s+i,10),20:ma(s+i,20),60:ma(s+i,60)})};
   drawChart();
-  setMsg("分析","完成。可点击 ② 匹配相似。");
+  setMsg("分析",`${TF_LABEL[timeframe]}分析完成。可点击 ② 匹配相似。`);
 }
 
 function addRow(tbl,cells,isHead){
@@ -1024,10 +1077,11 @@ $("btnM").onclick=()=>{
   if($("fSt").checked)for(const k in names)if(/ST/i.test(names[k]))stKeys.push(k);
   const cfg={
     refKey:keyOf(code),d1:dnum($("d1").value),d2:dnum($("d2").value),
+    timeframe:$("timeframe").value,
     zzth:parseFloat($("zz").value),
     mode:document.querySelector('input[name=mode]:checked').value,
     step:parseInt($("step").value),isolate:$("isolate").checked,
-    recentBars:$("recentBars").value===""?null:Math.min(5000,Math.max(15,parseInt($("recentBars").value))),
+    recentBars:$("recentBars").value===""?null:Math.min(5000,Math.max(8,parseInt($("recentBars").value))),
     preset:$("matchPreset").value,
     coarseThreshold:Math.min(.95,Math.max(.3,parseFloat($("coarseTh").value)||.75)),
     coarseLimit:Math.min(2000,Math.max(50,parseInt($("coarseLimit").value)||600)),dtwLimit:Math.min(1000,Math.max(20,parseInt($("dtwLimit").value)||200)),
@@ -1077,14 +1131,15 @@ function renderResults(){
   const statRows=lastStatRows||rows;
   $("matchPanel").style.display="block";
   const modeTxt=meta.mode==="hist"?"历史滑窗搜索":meta.mode==="recent"?"近期相似区间":"同期联动";
-  $("matchTitle").textContent=`匹配结果 · ${modeTxt} · 窗口${meta.L}个交易日${meta.mode==="recent"?` · 近期范围${meta.recentBars}日`:""} · 扫描${meta.scanned}只 · 跳过${meta.skipped||0}只 · 耗时${meta.elapsed}秒`+(meta.refWarn?" · ⚠未复权":" · 真实权息前复权");
+  const timeframe=meta.timeframe||"day",unit=TF_UNIT[timeframe];
+  $("matchTitle").textContent=`匹配结果 · ${TF_LABEL[timeframe]} · ${modeTxt} · 窗口${meta.L}个${unit}线周期${meta.mode==="recent"?` · 近期范围${meta.recentBars}个周期`:""} · 扫描${meta.scanned}只 · 跳过${meta.skipped||0}只 · 耗时${meta.elapsed}秒`+(meta.refWarn?" · ⚠未复权":" · 真实权息前复权");
   if(!rows.length){
     $("btStats").textContent="";$("matchTable").querySelector("tbody").textContent="";
     $("btNote").textContent=`没有找到符合条件的匹配。可尝试：缩短窗口（形态更通用）、关闭防前视限制、放宽市场范围、或降低粗筛门槛（当前要求32点形态余弦>${meta.settings.coarseThreshold.toFixed(2)}）。`;
     setMsg("匹配","完成，但无匹配结果。");return;
   }
   const bt=$("btStats");bt.textContent="";
-  const horizons=[["r5","5日后"],["r10","10日后"],["r20","20日后"],["r60","60日后"]];
+  const horizons=[["r5",`5${unit}后`],["r10",`10${unit}后`],["r20",`20${unit}后`],["r60",`60${unit}后`]];
   for(const[hk,label]of horizons){
     const summary=meta.statSummary[hk];
     const div=document.createElement("div");div.className="stat";
@@ -1104,7 +1159,7 @@ function renderResults(){
   const thead=$("matchTable").querySelector("thead");thead.textContent="";
   const cols=[["idx","#",false],["key","代码",true],["name","名称",false],["range","匹配区间",true],["nn","走势",false],
     ["score","综合分",true],["cum","累计走势",true],["ret","收益序列",true],["zig","拐点",true],["ma","均线",true],["vol","量能",true],["dtw","DTW",true],
-    ["r5","+5日",true],["r10","+10日",true],["r20","+20日",true],["r60","+60日",true],["maxUp","60日最大涨",true],["maxDn","60日最大回撤",true]];
+    ["r5",`+5${unit}`,true],["r10",`+10${unit}`,true],["r20",`+20${unit}`,true],["r60",`+60${unit}`,true],["maxUp",`60${unit}最大涨`,true],["maxDn",`60${unit}最大回撤`,true]];
   const trh=document.createElement("tr");
   for(const[k2,label,sortable]of cols){
     const th=document.createElement("th");th.textContent=label;
@@ -1160,7 +1215,8 @@ let lastOverlay=null;
 function showOverlay(r){
   lastOverlay=r;
   $("overlayBox").style.display="block";
-  $("ovTitle").textContent=`走势叠加：${$("code").value} vs ${r.key.slice(2)} ${names[r.key]||""}（${fmtD(r.startD)}~${fmtD(r.endD)}，其后60日虚线）`;
+  const unit=TF_UNIT[lastMeta&&lastMeta.timeframe||"day"];
+  $("ovTitle").textContent=`走势叠加：${$("code").value} vs ${r.key.slice(2)} ${names[r.key]||""}（${fmtD(r.startD)}~${fmtD(r.endD)}，其后60${unit}虚线）`;
   drawOverlay(r);
   $("overlayBox").scrollIntoView({behavior:"smooth",block:"nearest"});
 }
@@ -1207,10 +1263,10 @@ function drawOverlay(r){
 
 $("btnCsv").onclick=()=>{
   if(!lastRows)return;
-  const head=["代码","名称","开始","结束","模式","近期范围","综合分","累计走势","收益序列","拐点","均线","量能","DTW","复权存疑","权息状态","统计样本","算法版本","粗筛阈值","粗筛候选","DTW候选","DTW带宽","跳过原因","r5","r10","r20","r60","max60涨","max60撤"];
+  const head=["代码","名称","开始","结束","模式","周期","近期范围","综合分","累计走势","收益序列","拐点","均线","量能","DTW","复权存疑","权息状态","统计样本","算法版本","粗筛阈值","粗筛候选","DTW候选","DTW带宽","跳过原因","r5","r10","r20","r60","max60涨","max60撤"];
   const lines=[head.join(",")];
   lastRows.forEach((r,i)=>{
-    lines.push([r.key.slice(2),(names[r.key]||"").replace(/,/g,""),r.startD,r.endD,lastMeta.mode,lastMeta.recentBars??"",r.score.toFixed(4),
+    lines.push([r.key.slice(2),(names[r.key]||"").replace(/,/g,""),r.startD,r.endD,lastMeta.mode,lastMeta.timeframe||"day",lastMeta.recentBars??"",r.score.toFixed(4),
       r.sub.cum.toFixed(3),r.sub.ret.toFixed(3),r.sub.zig.toFixed(3),r.sub.ma.toFixed(3),r.sub.vol.toFixed(3),
       r.sub.dtw!==undefined?r.sub.dtw.toFixed(3):"",r.warn?1:0,rightsState,lastStatRows&&lastStatRows.includes(r)?1:0,UI_ALGO_VER,
       lastMeta.settings.coarseThreshold,lastMeta.settings.K_COARSE,lastMeta.settings.K_DTW,lastMeta.settings.dtwBand,Object.entries(lastMeta.skipReasons||{}).map(([k,n])=>k+":"+n).join(";"),
@@ -1220,7 +1276,7 @@ $("btnCsv").onclick=()=>{
   const blob=new Blob(["﻿"+lines.join("\r\n")],{type:"text/csv"});
   const a=document.createElement("a");
   a.href=URL.createObjectURL(blob);
-  a.download="相似匹配_"+$("code").value+"_"+$("d1").value+"_"+$("d2").value+".csv";
+  a.download="相似匹配_"+$("code").value+"_"+(lastMeta.timeframe||"day")+"_"+$("d1").value+"_"+$("d2").value+".csv";
   a.click();
 };
 </script>

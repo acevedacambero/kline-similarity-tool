@@ -5,7 +5,7 @@ const HTML = findHtml();
 
 test('worker exposes versioned pure algorithm API', () => {
   const { api } = loadWorker(HTML);
-  assert.equal(api.version, 7);
+  assert.equal(api.version, 8);
   assert.equal(typeof api.parseDayBuffer, 'function');
   assert.equal(typeof api.applyCorporateActions, 'function');
 });
@@ -64,6 +64,35 @@ test('day parser returns full records and rejects invalid or non-increasing date
   assert.equal(out.rejected, 3);
 });
 
+test('daily series aggregates to canonical weekly and monthly OHLCV bars', () => {
+  const { api } = loadWorker(HTML);
+  const series = {
+    dates: Int32Array.from([20260105, 20260106, 20260109, 20260112, 20260113, 20260116, 20260202]),
+    opens: Float64Array.from([10, 11, 12, 13, 14, 15, 16]),
+    highs: Float64Array.from([11, 12, 13, 14, 15, 16, 17]),
+    lows: Float64Array.from([9, 10, 11, 12, 13, 14, 15]),
+    closes: Float64Array.from([10.5, 11.5, 12.5, 13.5, 14.5, 15.5, 16.5]),
+    amounts: Float64Array.from([100, 200, 300, 400, 500, 600, 700]),
+    vols: Float64Array.from([10, 20, 30, 40, 50, 60, 70])
+  };
+  const weekly = api.aggregateSeries(series, 'week');
+  assert.deepEqual(Array.from(weekly.dates), [20260109, 20260116, 20260202]);
+  assert.deepEqual(Array.from(weekly.opens), [10, 13, 16]);
+  assert.deepEqual(Array.from(weekly.highs), [13, 16, 17]);
+  assert.deepEqual(Array.from(weekly.lows), [9, 12, 15]);
+  assert.deepEqual(Array.from(weekly.closes), [12.5, 15.5, 16.5]);
+  assert.deepEqual(Array.from(weekly.amounts), [600, 1500, 700]);
+  assert.deepEqual(Array.from(weekly.vols), [60, 150, 70]);
+  assert.equal(weekly.periods[0], api.periodKey(20260105, 'week'));
+  const partial = api.aggregateSeries(series, 'week', 20260113);
+  assert.deepEqual(Array.from(partial.dates), [20260109, 20260113]);
+  assert.equal(partial.closes[1], 14.5);
+  const monthly = api.aggregateSeries(series, 'month');
+  assert.deepEqual(Array.from(monthly.dates), [20260116, 20260202]);
+  assert.deepEqual(Array.from(monthly.closes), [15.5, 16.5]);
+  assert.deepEqual(Array.from(monthly.vols), [210, 70]);
+});
+
 test('similarity primitives are stable on edge cases', () => {
   const { api } = loadWorker(HTML);
   assert.deepEqual(Array.from(api.zscore([3, 3, 3])), [0, 0, 0]);
@@ -80,6 +109,11 @@ test('common-date alignment never uses positional slices', () => {
   assert.deepEqual(Array.from(out.dates), [1, 3, 4]);
   assert.deepEqual(Array.from(out.aCloses), [10, 12, 13]);
   assert.deepEqual(Array.from(out.bCloses), [20, 22, 23]);
+  const weeklyA = { dates: [20260109], periods: [100], closes: [10], vols: [1] };
+  const weeklyB = { dates: [20260108], periods: [100], closes: [20], vols: [2] };
+  const weekly = api.alignCommonDates(weeklyA, weeklyB);
+  assert.deepEqual(Array.from(weekly.dates), [20260109]);
+  assert.deepEqual(Array.from(weekly.bCloses), [20]);
 });
 
 test('date slicing narrows peer data before common-date alignment', () => {
@@ -129,10 +163,10 @@ test('cross-stock returns are clustered by nearby market periods', () => {
 
 test('cache validity includes algorithm and rights fingerprint', () => {
   const { api } = loadWorker(HTML);
-  const rec = { ver: 7, rv: 'abc', size: 32, mtime: 9 };
-  assert.equal(api.isCacheValid(rec, { size: 32, lastModified: 9 }, 'abc', 7), true);
-  assert.equal(api.isCacheValid(rec, { size: 32, lastModified: 9 }, 'xyz', 7), false);
-  assert.equal(api.isCacheValid({ ...rec, ver: 6 }, { size: 32, lastModified: 9 }, 'abc', 7), false);
+  const rec = { ver: 8, rv: 'abc', size: 32, mtime: 9 };
+  assert.equal(api.isCacheValid(rec, { size: 32, lastModified: 9 }, 'abc', 8), true);
+  assert.equal(api.isCacheValid(rec, { size: 32, lastModified: 9 }, 'xyz', 8), false);
+  assert.equal(api.isCacheValid({ ...rec, ver: 7 }, { size: 32, lastModified: 9 }, 'abc', 8), false);
 });
 
 test('recent windows default to L and always include latest window', () => {
