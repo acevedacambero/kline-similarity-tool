@@ -96,8 +96,27 @@ test('benchmark status explicitly reports missing local indexes', () => {
 
 test('placebo simulation precomputes rankings outside the round loop', () => {
   const html=fs.readFileSync(HTML_PATH,'utf8');
-  assert.match(html,/const prepared=preparePlaceboRankings\(matches,pool,horizon,family\)/);
+  assert.match(html,/const rankings=\(prepared\|\|preparePlaceboRankings\(eligible,pool\)\)/);
   assert.doesNotMatch(html,/for\(let r=0;r<rounds;r\+\+\)[\s\S]{0,500}rankPlacebos\(/);
+});
+
+test('all placebo horizons share one ranking pass and expose progress', () => {
+  const html=fs.readFileSync(HTML_PATH,'utf8');
+  assert.match(html,/placeboSummaries\(statRows,placeboPool/);
+  assert.ok(html.includes('随机基线统计'));
+});
+
+test('cache maintenance scans metadata rather than full stock arrays', () => {
+  const html=fs.readFileSync(HTML_PATH,'utf8');
+  assert.ok(html.includes('idbMetaAll'));
+  assert.match(html,/indexedDB\.open\("kline_tool_v2",3\)/);
+  assert.doesNotMatch(html,/async function maintainCache[\s\S]{0,250}idbAll\(/);
+});
+
+test('rights continuity uses direct market-key lookup', () => {
+  const html=fs.readFileSync(HTML_PATH,'utf8');
+  assert.doesNotMatch(html,/\[\.\.\.FILES\.entries\(\)\]\.find/);
+  assert.match(html,/FILES\.get\("sh"\+code\)/);
 });
 
 test('result protocol contains effective statistical samples', () => {
