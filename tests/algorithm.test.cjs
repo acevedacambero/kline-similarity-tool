@@ -93,6 +93,23 @@ test('daily series aggregates to canonical weekly and monthly OHLCV bars', () =>
   assert.deepEqual(Array.from(monthly.vols), [210, 70]);
 });
 
+test('board benchmark mapping uses the approved local indexes', () => {
+  const { api } = loadWorker(HTML);
+  assert.equal(api.benchmarkKeyFor('sh600000'), 'sh000300');
+  assert.equal(api.benchmarkKeyFor('sz000001'), 'sh000300');
+  assert.equal(api.benchmarkKeyFor('sz300001'), 'sz399006');
+  assert.equal(api.benchmarkKeyFor('sh688001'), 'sh000688');
+  assert.equal(api.benchmarkKeyFor('bj899001'), 'bj899050');
+  assert.equal(api.benchmarkKeyFor('sh510300'), 'sh000300');
+});
+
+test('benchmark return aligns each endpoint to the nearest prior date', () => {
+  const { api } = loadWorker(HTML);
+  const benchmark={dates:Int32Array.from([20260105,20260107,20260109]),closes:Float64Array.from([100,102,105])};
+  assert.ok(Math.abs(api.benchmarkReturn(benchmark,20260106,20260110)-.05)<1e-12);
+  assert.equal(api.benchmarkReturn(benchmark,20250101,20260110),null);
+});
+
 test('similarity primitives are stable on edge cases', () => {
   const { api } = loadWorker(HTML);
   assert.deepEqual(Array.from(api.zscore([3, 3, 3])), [0, 0, 0]);

@@ -1,6 +1,30 @@
 "use strict";
 const ALGO_VER=9;
-let FILES=null, RIGHTS=new Map(), RIGHTS_STATE={status:"raw",reason:"missing",count:0}, RIGHTS_STAMP="raw", cancelled=false, DB=null;
+let FILES=null, BENCHMARK_FILES=new Map(), BENCHMARKS=new Map(), RIGHTS=new Map(), RIGHTS_STATE={status:"raw",reason:"missing",count:0}, RIGHTS_STAMP="raw", cancelled=false, DB=null;
+
+function boardOfKey(key){
+  const mkt=key.slice(0,2),c=key.slice(2);
+  if(mkt==="bj")return "bj";
+  if(c.startsWith("68"))return "kcb";
+  if(c.startsWith("30"))return "cyb";
+  if((mkt==="sh"&&/^(51|56|58)/.test(c))||(mkt==="sz"&&/^(15|16)/.test(c)))return "etf";
+  if((mkt==="sh"&&c.startsWith("60"))||(mkt==="sz"&&c.startsWith("00")))return "main";
+  return null;
+}
+function benchmarkKeyFor(key){
+  return {main:"sh000300",cyb:"sz399006",kcb:"sh000688",bj:"bj899050",etf:"sh000300"}[boardOfKey(key)]||null;
+}
+function indexOnOrBefore(dates,d){
+  let lo=0,hi=dates.length-1,ans=-1;
+  while(lo<=hi){const m=(lo+hi)>>1;if(dates[m]<=d){ans=m;lo=m+1}else hi=m-1}
+  return ans;
+}
+function benchmarkReturn(series,startD,endD){
+  if(!series||!series.dates||!series.closes)return null;
+  const s=indexOnOrBefore(series.dates,startD),e=indexOnOrBefore(series.dates,endD);
+  if(s<0||e<=s||!Number.isFinite(series.closes[s])||!Number.isFinite(series.closes[e])||series.closes[s]<=0)return null;
+  return series.closes[e]/series.closes[s]-1;
+}
 
 function zscore(a){
   const n=a.length;let m=0;for(let i=0;i<n;i++)m+=a[i];m/=n;
@@ -329,7 +353,11 @@ function subScores(stk,s,e,R,zzth){
 self.onmessage=async ev=>{
   const msg=ev.data;
   if(msg.type==="files"){
-    FILES=new Map(msg.entries);RIGHTS_STAMP=msg.rightsStamp||"raw";let decodeError=null;
+    FILES=new Map(msg.entries);BENCHMARK_FILES=new Map(msg.benchmarks||[]);BENCHMARKS=new Map();
+    for(const [key,f0] of BENCHMARK_FILES){
+      try{const f=f0.getFile?await f0.getFile():f0,p=parseDayBuffer(await f.arrayBuffer());if(p.dates.length)BENCHMARKS.set(key,p)}catch(_){}
+    }
+    RIGHTS_STAMP=msg.rightsStamp||"raw";let decodeError=null;
     try{RIGHTS=msg.gbbq?decodeGbbq(msg.gbbq,msg.keyB64):null}
     catch(err){RIGHTS=new Map();decodeError=err}
     RIGHTS_STATE=resolveRightsState(RIGHTS,decodeError);
@@ -396,13 +424,7 @@ async function runMatch(cfg){
   const srcKeys=[...FILES.keys()];
   const keys=[];
   for(const k of srcKeys){
-    const mkt=k.slice(0,2),c=k.slice(2);
-    let board=null;
-    if(mkt==="bj")board="bj";
-    else if(c.startsWith("68"))board="kcb";
-    else if(c.startsWith("30"))board="cyb";
-    else if(mkt==="sh"&&/^(60)/.test(c)||mkt==="sz"&&/^(00)/.test(c))board="main";
-    else if(mkt==="sh"&&/^(51|56|58)/.test(c)||mkt==="sz"&&/^(15|16)/.test(c))board="etf";
+    const board=boardOfKey(k);
     if(!board)continue;
     if(!cfg.boards[board])continue;
     if(cfg.exST&&stSet.has(k))continue;
@@ -613,4 +635,4 @@ function packStk(stk,s,e){
   return {startD:stk.dates[s],endD:stk.dates[e],win,nnSmall,fut,futNn:futNn.length>1?Array.from(resample(new Float64Array(futNn),Math.min(60,futNn.length))):[],lastD:stk.lastD};
 }
 self.__KLINE_TEST_API__={version:ALGO_VER,parseDayBuffer,resolveRightsState,corporateActionFactor,applyCorporateActions,
-  aggregateSeries,periodKey,zscore,cosine,dtwDist,zigAmps,alignCommonDates,sliceSeriesByDate,dedupeOverlaps,mergePerStockCandidates,historicalMaxEnd,recentWindowStarts,recentFreshnessCutoff,clusterHorizonValues,bootstrapWinInterval,isCacheValid,adaptiveCoarseThreshold};
+  aggregateSeries,periodKey,zscore,cosine,dtwDist,zigAmps,alignCommonDates,sliceSeriesByDate,dedupeOverlaps,mergePerStockCandidates,historicalMaxEnd,recentWindowStarts,recentFreshnessCutoff,clusterHorizonValues,bootstrapWinInterval,isCacheValid,adaptiveCoarseThreshold,boardOfKey,benchmarkKeyFor,indexOnOrBefore,benchmarkReturn};

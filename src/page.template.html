@@ -155,10 +155,11 @@ details summary{cursor:pointer;font-size:13px;color:#2a78d6;margin-top:8px}
 "use strict";
 const $=id=>document.getElementById(id);
 const UI_ALGO_VER=9;
-let files=new Map(), names={}, gbbqFile=null, rightsState="raw", ref=null, worker=null, lastRows=null, lastStatRows=null, lastMeta=null, referenceDates=null, sortKey="score", sortAsc=false;
+let files=new Map(), benchmarkFiles=new Map(), names={}, gbbqFile=null, rightsState="raw", ref=null, worker=null, lastRows=null, lastStatRows=null, lastMeta=null, referenceDates=null, sortKey="score", sortAsc=false;
 let seriesSeq=0;const seriesWait=new Map();
 
 const A_PREFIX={sh:["600","601","603","605","688","51","56","58"],sz:["000","001","002","003","300","301","15","16"],bj:["43","83","87","92"]};
+const INDEX_KEYS=new Set(["sh000300","sz399006","sh000688","bj899050"]);
 
 function setMsg(phase,text){$("msg").textContent=(phase?`【${phase}】`:"")+text}
 function checkBrowserCapabilities(){
@@ -200,7 +201,7 @@ $("btnDir").onclick=async()=>{
     return;
   }
   setMsg("读取","正在扫描目录…（仅本地读取，不会上传）");
-  files=new Map();names={};gbbqFile=null;
+  files=new Map();benchmarkFiles=new Map();names={};gbbqFile=null;
   const getDir=async(h,path)=>{let cur=h;for(const seg of path){try{cur=await cur.getDirectoryHandle(seg)}catch(_){return null}}return cur};
   let vip=await getDir(root,["vipdoc"])||root;
   const tnf=[];
@@ -209,6 +210,7 @@ $("btnDir").onclick=async()=>{
     if(!lday)continue;
     for await(const[nm,h]of lday.entries()){
       const m=nm.match(/^(sh|sz|bj)(\d{6})\.day$/);
+      if(m&&INDEX_KEYS.has(m[1]+m[2])){benchmarkFiles.set(m[1]+m[2],h);continue}
       if(m&&A_PREFIX[m[1]]&&A_PREFIX[m[1]].some(x=>m[2].startsWith(x)))files.set(m[1]+m[2],h);
     }
   }
@@ -221,12 +223,13 @@ $("btnDir").onclick=async()=>{
 };
 
 $("dir").addEventListener("change",async e=>{
-  files=new Map();names={};gbbqFile=null;
+  files=new Map();benchmarkFiles=new Map();names={};gbbqFile=null;
   const tnf=[];
   for(const f of e.target.files){
     const p=(f.webkitRelativePath||f.name).replace(/\\/g,"/");
     let m=p.match(/(sh|sz|bj)\/lday\/(sh|sz|bj)(\d{6})\.day$/);
     if(m){
+      if(INDEX_KEYS.has(m[2]+m[3])){benchmarkFiles.set(m[2]+m[3],f);continue}
       if(A_PREFIX[m[2]]&&A_PREFIX[m[2]].some(x=>m[3].startsWith(x)))files.set(m[2]+m[3],f);
       continue;
     }
@@ -284,7 +287,7 @@ async function initWorker(){
   if(gbbqFile){
     try{gbbq=await gbbqFile.arrayBuffer();rightsStamp=`${gbbqFile.size}:${gbbqFile.lastModified}`}catch(_){}
   }
-  worker.postMessage({type:"files",entries:[...files.entries()],gbbq,keyB64:$("gbbqKey").textContent.trim(),rightsStamp});
+  worker.postMessage({type:"files",entries:[...files.entries()],benchmarks:[...benchmarkFiles.entries()],gbbq,keyB64:$("gbbqKey").textContent.trim(),rightsStamp});
 }
 
 function getAdjustedSeries(key,timeframe="day",endD=null){

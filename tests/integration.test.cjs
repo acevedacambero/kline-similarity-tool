@@ -41,6 +41,12 @@ test('TongdaXin is the only local data source and legacy Eastmoney cache is remo
   assert.match(html, /cleanupLegacyEastmoneyCache\(\)/);
 });
 
+test('local benchmark indexes are discovered outside the stock universe', () => {
+  const html=fs.readFileSync(HTML_PATH,'utf8');
+  assert.match(html,/const INDEX_KEYS=new Set\(\["sh000300","sz399006","sh000688","bj899050"\]\)/);
+  assert.match(html,/benchmarks:\[\.\.\.benchmarkFiles\.entries\(\)\]/);
+});
+
 test('result protocol contains effective statistical samples', () => {
   const html = fs.readFileSync(HTML_PATH, 'utf8');
   assert.match(html, /statRows/);
